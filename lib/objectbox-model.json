@@ -1,0 +1,198 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "2:704718345827476885",
+      "lastPropertyId": "10:8540174188432278879",
+      "name": "Chapter",
+      "properties": [
+        {
+          "id": "1:3618094261372661864",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:8876555900701545395",
+          "name": "serieId",
+          "type": 6
+        },
+        {
+          "id": "3:8705338084580982811",
+          "name": "title",
+          "type": 9
+        },
+        {
+          "id": "4:3172288430397896230",
+          "name": "number",
+          "type": 8
+        },
+        {
+          "id": "5:353167940266335955",
+          "name": "volume",
+          "type": 6
+        },
+        {
+          "id": "6:4338647635890083508",
+          "name": "pagePaths",
+          "type": 30
+        },
+        {
+          "id": "7:1330642781853596065",
+          "name": "folderPath",
+          "type": 9
+        },
+        {
+          "id": "8:2813946330395320075",
+          "name": "cbzPath",
+          "type": 9
+        },
+        {
+          "id": "9:6068414306405061727",
+          "name": "lastPageIndex",
+          "type": 6
+        },
+        {
+          "id": "10:8540174188432278879",
+          "name": "addedAt",
+          "type": 10
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:1885637212791138004",
+      "lastPropertyId": "13:4174117914556712025",
+      "name": "Serie",
+      "properties": [
+        {
+          "id": "1:1114812125423967324",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1272956606833129508",
+          "name": "title",
+          "type": 9
+        },
+        {
+          "id": "3:2662234846635556449",
+          "name": "description",
+          "type": 9
+        },
+        {
+          "id": "4:250615523988137514",
+          "name": "category",
+          "type": 9
+        },
+        {
+          "id": "5:7793034402317164009",
+          "name": "coverThumbPath",
+          "type": 9
+        },
+        {
+          "id": "6:7842908299191096113",
+          "name": "folderPath",
+          "type": 9
+        },
+        {
+          "id": "7:8184111387760860757",
+          "name": "sourceId",
+          "type": 9
+        },
+        {
+          "id": "8:7887125803936746769",
+          "name": "dexId",
+          "type": 9
+        },
+        {
+          "id": "9:4332977718132527549",
+          "name": "sourceUrl",
+          "type": 9
+        },
+        {
+          "id": "10:2729428950680956091",
+          "name": "kind",
+          "type": 9
+        },
+        {
+          "id": "11:7555683009449110303",
+          "name": "addedAt",
+          "type": 10
+        },
+        {
+          "id": "12:919129271328746552",
+          "name": "recommendationsJson",
+          "type": 9
+        },
+        {
+          "id": "13:4174117914556712025",
+          "name": "arcsJson",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "4:2075165117956073161",
+      "lastPropertyId": "4:8776457432531196675",
+      "name": "VolumeIndex",
+      "properties": [
+        {
+          "id": "1:6761962942029312015",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1675442728961065855",
+          "name": "dexId",
+          "type": 9
+        },
+        {
+          "id": "3:7167069176342511551",
+          "name": "data",
+          "type": 9
+        },
+        {
+          "id": "4:8776457432531196675",
+          "name": "updatedAt",
+          "type": 10
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "4:2075165117956073161",
+  "lastIndexId": "0:0",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [
+    1368042165252496314
+  ],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [
+    9042154562856219029,
+    3971701222021102604,
+    4355194192970399923,
+    4675742755748779102,
+    7723826271663382631,
+    2641698333413776877,
+    6862203170991768850,
+    6304195383208381487,
+    7953250552548158715,
+    2061780594327931380,
+    2229578750739235261,
+    79413790625313418,
+    7192706370775152616,
+    4351675091690243619,
+    4362026922958768206
+  ],
+  "retiredRelationUids": [],
+  "version": 1
+}
