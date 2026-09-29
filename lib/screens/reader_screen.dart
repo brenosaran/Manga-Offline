@@ -263,11 +263,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
         key == LogicalKeyboardKey.arrowDown ||
         key == LogicalKeyboardKey.pageDown ||
         key == LogicalKeyboardKey.space) {
-      _nextPage();
+      _nextBubble();
     } else if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.pageUp) {
-      _previousPage();
+      _previousBubble();
     } else if (key == LogicalKeyboardKey.escape) {
       Navigator.of(context).maybePop();
     }
