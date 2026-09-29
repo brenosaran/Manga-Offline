@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../core/bubble_data.dart';
 import '../core/reading_layout.dart';
 import '../core/settings_controller.dart';
 import '../models/chapter.dart';
@@ -27,6 +29,7 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen> {
   final VolumeButtonService _volume = VolumeButtonService();
   final FocusNode _focusNode = FocusNode();
+  final TransformationController _transform = TransformationController();
   PageController _pageController = PageController();
   late int _currentPage;
   int _currentIndex = 0;
@@ -35,6 +38,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _coverAlone = true;
   bool _initialized = false;
   List<PageSpread> _spreads = const [];
+  BubbleData? _bubbleData;
+  int _bubbleIndex = -1;
 
   int get _pageCount => widget.chapter.pagePaths.length;
 
@@ -48,8 +53,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _focusNode.requestFocus();
-      await _volume.enable(onNext: _nextPage, onPrevious: _previousPage);
+      await _volume.enable(onNext: _nextBubble, onPrevious: _previousBubble);
     });
+    _loadBubbles();
   }
 
   @override
@@ -57,6 +63,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     widget.controller.saveChapterProgress(widget.chapter, _currentPage);
     _volume.disable();
     _pageController.dispose();
+    _transform.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -125,6 +132,130 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _pageController.jumpToPage(index);
   }
 
+  /// Carrega as caixas de balões pré-processadas (arquivo `bubbles.json` no
+  /// diretório do capítulo), se existirem.
+  Future<void> _loadBubbles() async {
+    final data = await BubbleData.load(widget.chapter.folderPath);
+    if (!mounted) return;
+    setState(() => _bubbleData = data);
+  }
+
+  bool get _singlePage =>
+      _spreads.isNotEmpty && _spreads[_currentIndex].isSingle;
+
+  BubblePage? get _currentBubblePage {
+    if (_currentPage < 0 || _currentPage >= _pageCount) return null;
+    return _bubbleData?.pageFor(widget.chapter.pagePaths[_currentPage]);
+  }
+
+  List<BubbleBox> get _currentBubbles => _currentBubblePage?.bubbles ?? const [];
+
+  void _resetZoom() {
+    _transform.value = Matrix4.identity();
+  }
+
+  /// Avança pelo próximo balão; ao terminar os balões, vira a página.
+  void _nextBubble() {
+    if (!_singlePage) {
+      _nextPage();
+      return;
+    }
+    final bubbles = _currentBubbles;
+    if (bubbles.isNotEmpty && _bubbleIndex < bubbles.length - 1) {
+      setState(() => _bubbleIndex++);
+      _zoomToBubble(bubbles[_bubbleIndex]);
+      return;
+    }
+    _turnPage(1);
+  }
+
+  /// Volta pelo balão anterior; no início, volta para a página inteira e depois
+  /// para a página anterior.
+  void _previousBubble() {
+    if (!_singlePage) {
+      _previousPage();
+      return;
+    }
+    final bubbles = _currentBubbles;
+    if (bubbles.isNotEmpty && _bubbleIndex > 0) {
+      setState(() => _bubbleIndex--);
+      _zoomToBubble(bubbles[_bubbleIndex]);
+      return;
+    }
+    if (_bubbleIndex == 0) {
+      setState(() => _bubbleIndex = -1);
+      _resetZoom();
+      return;
+    }
+    _turnPage(-1);
+  }
+
+  void _turnPage(int direction) {
+    setState(() => _bubbleIndex = -1);
+    _resetZoom();
+    if (direction > 0) {
+      _nextPage();
+    } else {
+      _previousPage();
+    }
+  }
+
+  /// Dá zoom no balão [box], mapeando as coordenadas da imagem para a tela.
+  void _zoomToBubble(BubbleBox box) {
+    final page = _currentBubblePage;
+    if (page == null) return;
+    final size = MediaQuery.of(context).size;
+    final vw = size.width;
+    final vh = size.height;
+    final iw = page.width.toDouble();
+    final ih = page.height.toDouble();
+    if (iw <= 0 || ih <= 0) return;
+
+    final ar = iw / ih;
+    double dispW;
+    double dispH;
+    if (vw / vh > ar) {
+      dispH = vh;
+      dispW = vh * ar;
+    } else {
+      dispW = vw;
+      dispH = vw / ar;
+    }
+    final s = dispW / iw;
+    final offX = (vw - dispW) / 2;
+    final offY = (vh - dispH) / 2;
+    final bx = (box.x + box.w / 2) * s + offX;
+    final by = (box.y + box.h / 2) * s + offY;
+    final bubbleW = box.w * s;
+    final bubbleH = box.h * s;
+    if (bubbleW <= 0 || bubbleH <= 0) return;
+
+    var k = math.min(vw / bubbleW, vh / bubbleH);
+    k = k.clamp(1.0, 6.0);
+    final tx = vw / 2 - k * bx;
+    final ty = vh / 2 - k * by;
+    _transform.value = Matrix4.translationValues(tx, ty, 0) *
+        Matrix4.diagonal3Values(k, k, 1);
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    final size = MediaQuery.of(context).size;
+    if (_bubbleIndex >= 0) {
+      setState(() => _bubbleIndex = -1);
+      _resetZoom();
+      return;
+    }
+    final dx = details.localPosition.dx;
+    final zone = size.width * 0.30;
+    if (dx < zone) {
+      _turnPage(-1);
+    } else if (dx > size.width - zone) {
+      _turnPage(1);
+    } else {
+      _toggleChrome();
+    }
+  }
+
   void _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return;
     final key = event.logicalKey;
@@ -170,7 +301,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         onKeyEvent: _onKey,
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onTap: _toggleChrome,
+          onTapUp: _onTapUp,
           child: Stack(
             children: [
               _buildPages(),
@@ -202,7 +333,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
         setState(() {
           _currentIndex = index;
           _currentPage = _spreads[index].firstPage;
+          _bubbleIndex = -1;
         });
+        _resetZoom();
         widget.controller.saveChapterProgress(widget.chapter, _currentPage);
       },
       itemBuilder: (context, index) => _buildSpread(_spreads[index]),
@@ -228,8 +361,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Widget _buildViewer(Widget child) {
     return InteractiveViewer(
+      transformationController: _transform,
       minScale: 1,
-      maxScale: 5,
+      maxScale: 6,
       child: child,
     );
   }

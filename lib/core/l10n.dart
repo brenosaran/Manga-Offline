@@ -54,7 +54,7 @@ class L10n {
   String pageOf(int a, int b) => 'Página $a de $b';
   String arc(String name) => 'Arco: $name';
 
-  String get readerVolumeHint => 'Volume: ↑ volta · ↓ avança';
+  String get readerVolumeHint => '↓ próximo balão · ↑ anterior · cantos: página';
   String readerPageOf(int a, int b) => 'Página $a de $b';
   String readerSpreadOf(int a, int b, int total) =>
       'Páginas $a–$b de $total';
@@ -215,7 +215,7 @@ class En extends L10n {
   String arc(String name) => 'Arc: $name';
 
   @override
-  String get readerVolumeHint => 'Volume: ↑ back · ↓ next';
+  String get readerVolumeHint => '↓ next bubble · ↑ previous · corners: page';
   @override
   String readerPageOf(int a, int b) => 'Page $a of $b';
   @override
