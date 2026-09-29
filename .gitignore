@@ -49,10 +49,6 @@ app.*.map.json
 
 # --- N�o publicar (conte�do/ferramentas locais) ---
 /downloads/
-/bin/download_mangadex.dart
-/test/downloader_test.dart
-/test/mangalivre_test.dart
-/lib/downloader/
 /android/build/
 
 # --- Artefatos de treino de ML (fora do app) ---
@@ -61,3 +57,5 @@ app.*.map.json
 *.pt
 *.onnx
 *.tflite
+# ...mas o modelo embutido no app É versionado (asset de build da Fase 6):
+!assets/models/*.tflite

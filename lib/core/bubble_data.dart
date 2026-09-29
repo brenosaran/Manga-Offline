@@ -61,17 +61,21 @@ class BubbleData {
 
   BubblePage? pageFor(String pagePath) => pages[p.basename(pagePath)];
 
+  static BubbleData fromJson(Map<String, dynamic> root) {
+    final pages = <String, BubblePage>{};
+    final raw = root['pages'] as Map<String, dynamic>? ?? const {};
+    raw.forEach((key, value) {
+      pages[key] = BubblePage.fromJson(value as Map<String, dynamic>);
+    });
+    return BubbleData(pages);
+  }
+
   static Future<BubbleData?> load(String folderPath) async {
     final file = File(p.join(folderPath, 'bubbles.json'));
     if (!await file.exists()) return null;
     try {
       final root = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      final pages = <String, BubblePage>{};
-      final raw = root['pages'] as Map<String, dynamic>? ?? const {};
-      raw.forEach((key, value) {
-        pages[key] = BubblePage.fromJson(value as Map<String, dynamic>);
-      });
-      return BubbleData(pages);
+      return fromJson(root);
     } catch (_) {
       return null;
     }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import '../objectbox.g.dart';
 import '../core/settings_controller.dart';
 import 'package:manga_offline/downloader/mangalivre_api.dart';
 import 'archive_service.dart';
+import 'bubble_detector.dart';
 import 'chapter_download_service.dart';
 import 'database_service.dart';
 import 'mangadex_service.dart';
@@ -360,6 +362,25 @@ class LibraryController extends ChangeNotifier {
           .toList();
     }
     chapter.folderPath = contentDir.path;
+
+    // Pré-calcula os balões (modelo .tflite) assim que o capítulo é importado/
+    // baixado, para o leitor não rodar a detecção na primeira abertura.
+    if (extract && chapter.pagePaths.isNotEmpty) {
+      unawaited(_precomputeBubbles(contentDir.path, List.of(chapter.pagePaths)));
+    }
+  }
+
+  /// Roda a detecção de balões em segundo plano e grava o `bubbles.json`.
+  Future<void> _precomputeBubbles(
+    String folderPath,
+    List<String> pagePaths,
+  ) async {
+    if (!BubbleDetectionService.isSupported) return;
+    if (File(p.join(folderPath, 'bubbles.json')).existsSync()) return;
+    await BubbleDetectionService.detectAndCache(
+      folderPath: folderPath,
+      pagePaths: pagePaths,
+    );
   }
 
   void _moveFile(String from, String to) {

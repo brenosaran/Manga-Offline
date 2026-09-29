@@ -9,6 +9,7 @@ import '../core/bubble_data.dart';
 import '../core/reading_layout.dart';
 import '../core/settings_controller.dart';
 import '../models/chapter.dart';
+import '../services/bubble_detector.dart';
 import '../services/library_controller.dart';
 import '../services/volume_button_service.dart';
 
@@ -134,9 +135,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   /// Carrega as caixas de balões pré-processadas (arquivo `bubbles.json` no
-  /// diretório do capítulo), se existirem.
+  /// diretório do capítulo). Se o arquivo não existir, tenta detectá-las no
+  /// aparelho com o modelo `.tflite` e grava o cache.
   Future<void> _loadBubbles() async {
-    final data = await BubbleData.load(widget.chapter.folderPath);
+    var data = await BubbleData.load(widget.chapter.folderPath);
+    if (data == null && BubbleDetectionService.isSupported) {
+      data = await BubbleDetectionService.detectAndCache(
+        folderPath: widget.chapter.folderPath,
+        pagePaths: widget.chapter.pagePaths,
+      );
+    }
     if (!mounted) return;
     setState(() => _bubbleData = data);
   }
@@ -173,7 +181,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final bubbles = _currentBubbles;
     if (bubbles.isNotEmpty && _bubbleIndex < bubbles.length - 1) {
       setState(() => _bubbleIndex++);
-      _zoomToBubble(bubbles[_bubbleIndex]);
+      _resetZoom();
       return;
     }
     _turnPage(1);
@@ -189,12 +197,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final bubbles = _currentBubbles;
     if (bubbles.isNotEmpty && _bubbleIndex > 0) {
       setState(() => _bubbleIndex--);
-      _zoomToBubble(bubbles[_bubbleIndex]);
+      _resetZoom();
       return;
     }
     if (_bubbleIndex == 0) {
       setState(() => _bubbleIndex = -1);
-      _resetZoom();
       return;
     }
     _turnPage(-1);
@@ -210,42 +217,89 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  /// Dá zoom no balão [box], mapeando as coordenadas da imagem para a tela.
-  void _zoomToBubble(BubbleBox box) {
+  /// Mostra o balão atual como uma **cópia recortada e ampliada flutuando sobre
+  /// a página** (estilo *Google Livros*): a página inteira continua visível e o
+  /// balão aparece um pouco maior, no mesmo lugar em que está.
+  Widget _buildBubbleOverlay() {
     final page = _currentBubblePage;
-    if (page == null) return;
-    final size = MediaQuery.of(context).size;
-    final vw = size.width;
-    final vh = size.height;
-    final iw = page.width.toDouble();
-    final ih = page.height.toDouble();
-    if (iw <= 0 || ih <= 0) return;
-
-    final ar = iw / ih;
-    double dispW;
-    double dispH;
-    if (vw / vh > ar) {
-      dispH = vh;
-      dispW = vh * ar;
-    } else {
-      dispW = vw;
-      dispH = vw / ar;
+    final bubbles = _currentBubbles;
+    if (page == null || _bubbleIndex < 0 || _bubbleIndex >= bubbles.length) {
+      return const SizedBox.shrink();
     }
-    final s = dispW / iw;
-    final offX = (vw - dispW) / 2;
-    final offY = (vh - dispH) / 2;
-    final bx = (box.x + box.w / 2) * s + offX;
-    final by = (box.y + box.h / 2) * s + offY;
-    final bubbleW = box.w * s;
-    final bubbleH = box.h * s;
-    if (bubbleW <= 0 || bubbleH <= 0) return;
+    final box = bubbles[_bubbleIndex];
+    final imagePath = widget.chapter.pagePaths[_currentPage];
+    final imgW = page.width.toDouble();
+    final imgH = page.height.toDouble();
+    if (imgW <= 0 || imgH <= 0 || box.w <= 0 || box.h <= 0) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final vw = constraints.maxWidth;
+            final vh = constraints.maxHeight;
+            // Layout "contain" da página (o mesmo da imagem em fundo).
+            final s = math.min(vw / imgW, vh / imgH);
+            final offX = (vw - imgW * s) / 2;
+            final offY = (vh - imgH * s) / 2;
+            final bw = box.w * s;
+            final bh = box.h * s;
+            final cx = offX + (box.x + box.w / 2) * s;
+            final cy = offY + (box.y + box.h / 2) * s;
 
-    var k = math.min(vw / bubbleW, vh / bubbleH);
-    k = k.clamp(1.0, 6.0);
-    final tx = vw / 2 - k * bx;
-    final ty = vh / 2 - k * by;
-    _transform.value = Matrix4.translationValues(tx, ty, 0) *
-        Matrix4.diagonal3Values(k, k, 1);
+            // Fator de ampliação: o balão não passa de ~50% da largura nem de
+            // ~33% da altura; no máximo 2,5×, nunca diminuindo.
+            var k = math.min(0.50 * vw / bw, 0.33 * vh / bh);
+            k = k.clamp(1.0, 2.5).toDouble();
+            final ew = bw * k;
+            final eh = bh * k;
+
+            // Centraliza a cópia no balão, mantendo-a dentro da tela.
+            var left = cx - ew / 2;
+            var top = cy - eh / 2;
+            if (ew <= vw) left = left.clamp(0.0, vw - ew);
+            if (eh <= vh) top = top.clamp(0.0, vh - eh);
+
+            return Stack(
+              children: [
+                Positioned(
+                  left: left,
+                  top: top,
+                  width: ew,
+                  height: eh,
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      boxShadow: [
+                        BoxShadow(color: Color(0x66000000), blurRadius: 14),
+                      ],
+                    ),
+                    child: ClipRect(
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: ew / 2 - (box.x + box.w / 2) * s * k,
+                            top: eh / 2 - (box.y + box.h / 2) * s * k,
+                            width: imgW * s * k,
+                            height: imgH * s * k,
+                            child: Image.file(
+                              File(imagePath),
+                              fit: BoxFit.fill,
+                              filterQuality: FilterQuality.medium,
+                              gaplessPlayback: true,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
   }
 
   void _onTapUp(TapUpDetails details) {
@@ -315,6 +369,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           child: Stack(
             children: [
               _buildPages(),
+              _buildBubbleOverlay(),
               _buildTopBar(context),
               _buildBottomBar(context),
             ],
