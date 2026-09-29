@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/l10n.dart';
 import '../core/settings_controller.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -53,6 +54,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(l10n.keepScreenOnTitle),
             subtitle: Text(l10n.keepScreenOnSubtitle),
           ),
+          ListTile(
+            leading: const Icon(Icons.auto_stories_outlined),
+            title: Text(l10n.dualPageTitle),
+            subtitle: Text(l10n.dualPageSubtitle),
+            trailing: DropdownButton<DualPageMode>(
+              value: settings.dualPageMode,
+              onChanged: (value) {
+                if (value != null) settings.setDualPageMode(value);
+              },
+              items: [
+                for (final mode in DualPageMode.values)
+                  DropdownMenuItem(
+                    value: mode,
+                    child: Text(_dualPageLabel(l10n, mode)),
+                  ),
+              ],
+            ),
+          ),
+          SwitchListTile(
+            value: settings.coverAlone,
+            onChanged: (value) => settings.setCoverAlone(value),
+            title: Text(l10n.coverAloneTitle),
+            subtitle: Text(l10n.coverAloneSubtitle),
+          ),
           const Divider(height: 1),
           _SectionHeader(l10n.aiSection),
           ListTile(
@@ -77,6 +102,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+String _dualPageLabel(L10n l10n, DualPageMode mode) {
+  return switch (mode) {
+    DualPageMode.auto => l10n.dualPageAuto,
+    DualPageMode.always => l10n.dualPageAlways,
+    DualPageMode.never => l10n.dualPageNever,
+  };
 }
 
 class _SectionHeader extends StatelessWidget {

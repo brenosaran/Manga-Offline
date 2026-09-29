@@ -29,6 +29,7 @@ class L10n {
       'Sem sugestões (precisa de internet para carregar).';
   String get noChapters => 'Sem capítulos';
   String get noChaptersHere => 'Nenhum capítulo aqui.';
+  String get loadingChapters => 'Carregando capítulos...';
   String get importHint =>
       'Importe arquivos .cbz (ex.: "One Piece - Cap 0001.cbz") que a organização em volumes é automática.';
 
@@ -55,6 +56,8 @@ class L10n {
 
   String get readerVolumeHint => 'Volume: ↑ volta · ↓ avança';
   String readerPageOf(int a, int b) => 'Página $a de $b';
+  String readerSpreadOf(int a, int b, int total) =>
+      'Páginas $a–$b de $total';
 
   String get catalogTitle => 'Adicionar mangá';
   String get catalogSearchHint => 'Pesquisar mangá (ex.: One Piece)';
@@ -69,13 +72,36 @@ class L10n {
   String get ghost => 'Não baixado';
   String get importThisFile => 'Importar arquivo';
   String get ghostHint =>
-      'Capítulo que existe na obra mas ainda não está no app. Toque para importar um arquivo.';
+      'Capítulo que existe na obra mas ainda não está no app. Toque para baixar da internet.';
+  String get ghostDownloading => 'Baixando o capítulo...';
+  String ghostDownloadDone(int number) =>
+      'Capítulo $number baixado e adicionado à biblioteca.';
+  String ghostDownloadFailed(String error) =>
+      'Falha ao baixar o capítulo: $error';
+  String get downloadVolumeTooltip => 'Baixar volume';
+  String get volumeDownloadEmpty => 'Nada para baixar neste volume.';
+  String volumeDownloading(int done, int total) =>
+      'Baixando capítulo $done de $total...';
+  String volumeDownloadDone(int ok, int failed) => failed == 0
+      ? '$ok capítulo(s) baixado(s).'
+      : '$ok baixado(s), $failed falha(s).';
+  String volumeDownloadFailed(String error) =>
+      'Falha ao baixar o volume: $error';
 
   String get readingSection => 'Leitura';
   String get volumeButtonTitle => 'Botão de volume';
   String get volumeButtonSubtitle => 'Usar volume ↑/↓ para virar página';
   String get keepScreenOnTitle => 'Manter tela acesa';
   String get keepScreenOnSubtitle => 'Evitar que a tela apague durante a leitura';
+  String get dualPageTitle => 'Página dupla';
+  String get dualPageSubtitle =>
+      'Duas páginas lado a lado ao abrir a tela (dobrável/tablet), como um mangá';
+  String get dualPageAuto => 'Automático';
+  String get dualPageAlways => 'Sempre';
+  String get dualPageNever => 'Nunca';
+  String get coverAloneTitle => 'Capa sozinha';
+  String get coverAloneSubtitle =>
+      'Mostrar a primeira página sozinha, como num mangá impresso';
   String get aiSection => 'Inteligência artificial';
   String get bubbleZoom => 'Bubble Zoom';
   String get bubbleZoomSubtitle => 'Detecção de balões e zoom — em desenvolvimento';
@@ -149,6 +175,8 @@ class En extends L10n {
   @override
   String get noChaptersHere => 'No chapters here.';
   @override
+  String get loadingChapters => 'Loading chapters...';
+  @override
   String get importHint =>
       'Import .cbz files (e.g. "One Piece - Cap 0001.cbz"); volume organization is automatic.';
 
@@ -190,6 +218,8 @@ class En extends L10n {
   String get readerVolumeHint => 'Volume: ↑ back · ↓ next';
   @override
   String readerPageOf(int a, int b) => 'Page $a of $b';
+  @override
+  String readerSpreadOf(int a, int b, int total) => 'Pages $a–$b of $total';
 
   @override
   String get catalogTitle => 'Add manga';
@@ -215,7 +245,29 @@ class En extends L10n {
   String get importThisFile => 'Import file';
   @override
   String get ghostHint =>
-      'Chapter exists in the series but is not in the app yet. Tap to import a file.';
+      'Chapter exists in the series but is not in the app yet. Tap to download from the internet.';
+  @override
+  String get ghostDownloading => 'Downloading chapter...';
+  @override
+  String ghostDownloadDone(int number) =>
+      'Chapter $number downloaded and added to the library.';
+  @override
+  String ghostDownloadFailed(String error) =>
+      'Failed to download the chapter: $error';
+  @override
+  String get downloadVolumeTooltip => 'Download volume';
+  @override
+  String get volumeDownloadEmpty => 'Nothing to download in this volume.';
+  @override
+  String volumeDownloading(int done, int total) =>
+      'Downloading chapter $done of $total...';
+  @override
+  String volumeDownloadDone(int ok, int failed) => failed == 0
+      ? '$ok chapter(s) downloaded.'
+      : '$ok downloaded, $failed failed.';
+  @override
+  String volumeDownloadFailed(String error) =>
+      'Failed to download the volume: $error';
 
   @override
   String get readingSection => 'Reading';
@@ -227,6 +279,22 @@ class En extends L10n {
   String get keepScreenOnTitle => 'Keep screen on';
   @override
   String get keepScreenOnSubtitle => 'Prevent the screen from turning off';
+  @override
+  String get dualPageTitle => 'Dual page';
+  @override
+  String get dualPageSubtitle =>
+      'Two pages side by side when the screen is open (foldable/tablet), like a manga';
+  @override
+  String get dualPageAuto => 'Automatic';
+  @override
+  String get dualPageAlways => 'Always';
+  @override
+  String get dualPageNever => 'Never';
+  @override
+  String get coverAloneTitle => 'Cover alone';
+  @override
+  String get coverAloneSubtitle =>
+      'Show the first page alone, like a printed manga';
   @override
   String get aiSection => 'Artificial intelligence';
   @override

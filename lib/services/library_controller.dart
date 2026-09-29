@@ -10,7 +10,9 @@ import '../models/serie.dart';
 import '../models/volume_index.dart';
 import '../objectbox.g.dart';
 import '../core/settings_controller.dart';
+import 'package:manga_offline/downloader/mangalivre_api.dart';
 import 'archive_service.dart';
+import 'chapter_download_service.dart';
 import 'database_service.dart';
 import 'mangadex_service.dart';
 import 'metadata_service.dart';
@@ -22,6 +24,14 @@ class ImportReport {
   final List<String> skipped = [];
 
   bool get hasIssues => failed.isNotEmpty || skipped.isNotEmpty;
+}
+
+/// Resultado do download de um volume inteiro.
+class VolumeDownloadReport {
+  VolumeDownloadReport({required this.downloaded, required this.failed});
+
+  final int downloaded;
+  final List<int> failed;
 }
 
 class ParsedChapter {
@@ -227,11 +237,12 @@ class LibraryController extends ChangeNotifier {
     } catch (_) {}
 
     await load();
+    // Busca volumes/arcos logo após adicionar, para já listar os ghosts.
+    _syncVolumes();
     return serie;
   }
 
-  Future<ImportReport> importFiles(List<String> paths) async {
-    final report = ImportReport();
+  Future<ImportReport> importFiles(List<String> paths) async {    final report = ImportReport();
 
     for (final path in paths) {
       if (!_archive.isSupportedFile(path)) {
@@ -500,11 +511,21 @@ class LibraryController extends ChangeNotifier {
           if (await _syncArcs(serie)) changed = true;
         } catch (_) {}
 
+        // Mapa capítulo→volume. Sem `dexId`, ainda montamos a lista de
+        // capítulos pelo MangaLivre (volumes viram 0 = "Sem volume").
+        final map = <int, int>{};
+        if (dexId != null && dexId.isNotEmpty) {
+          try {
+            map.addAll(await _dex.chapterVolumes(dexId));
+          } catch (_) {}
+          await _fillVolumeGaps(serie, map);
+        }
+        await _fillMangaLivreGaps(serie, map);
+        _chapterVolumeBySerie[serie.id] = map;
+
         if (dexId == null || dexId.isEmpty) continue;
 
         try {
-          final map = await _dex.chapterVolumes(dexId);
-          _chapterVolumeBySerie[serie.id] = map;
           final data =
               jsonEncode(map.map((k, v) => MapEntry(k.toString(), v)));
           final existing = _db.volumeIndexes
@@ -546,8 +567,42 @@ class LibraryController extends ChangeNotifier {
     }
   }
 
+  /// Preenche lacunas do mapa capítulo→volume do MangaDex.
+  ///
+  /// O `aggregate` do MangaDex não tem o volume de vários capítulos de One
+  /// Piece (ex.: volumes 8–60). Para One Piece, usamos a **One Piece API**
+  /// (`/v2/chapters`) — que cobre todos os volumes — sem sobrescrever os
+  /// valores já vindos do MangaDex.
+  Future<void> _fillVolumeGaps(Serie serie, Map<int, int> map) async {
+    if (!_normalize(serie.title).contains('onepiece')) return;
+    try {
+      final opMap = await _onePiece.chapterVolumes();
+      for (final entry in opMap.entries) {
+        map.putIfAbsent(entry.key, () => entry.value);
+      }
+    } catch (_) {}
+  }
+
+  /// Complementa a lista de capítulos com o **MangaLivre**.
+  ///
+  /// O MangaLivre **não** expõe o volume dos capítulos (nem no HTML nem em
+  /// outra rota), então aqui ele serve para garantir que **nenhum capítulo
+  /// existente fique de fora**: os capítulos que o MangaDex não conhece entram
+  /// com volume **0** (grupo "Sem volume"), em vez de serem omitidos.
+  Future<void> _fillMangaLivreGaps(Serie serie, Map<int, int> map) async {
+    final api = MangaLivreApi();
+    try {
+      final chapters = await api.listChapters(mangaLivreUrlFor(serie.title));
+      for (final chapter in chapters) {
+        map.putIfAbsent(chapter.number, () => 0);
+      }
+    } catch (_) {
+    } finally {
+      api.dispose();
+    }
+  }
+
   Future<bool> _syncArcs(Serie serie) async {
-    if (serie.arcsJson.trim().isNotEmpty) return false;
     if (!_normalize(serie.title).contains('onepiece')) return false;
     try {
       final map = await _onePiece.volumeSagas();
@@ -566,7 +621,7 @@ class LibraryController extends ChangeNotifier {
     try {
       final decoded = jsonDecode(serie.arcsJson) as Map<String, dynamic>;
       return decoded.map((k, v) =>
-          MapEntry(int.parse(k), v.toString()));
+          MapEntry(int.parse(k), _onePiece.englishSagaName(v.toString())));
     } catch (_) {
       return {};
     }
@@ -574,7 +629,10 @@ class LibraryController extends ChangeNotifier {
 
   String? arcForVolume(Serie serie, int volume) {
     if (volume <= 0) return null;
-    return _arcMap(serie)[volume];
+    // Lê a versão mais recente do banco: o objeto `serie` da tela pode estar
+    // desatualizado e não ter os arcos recém-sincronizados.
+    final current = _db.series.get(serie.id) ?? serie;
+    return _arcMap(current)[volume];
   }
   Future<bool> _syncVolumeCovers(
     Serie serie,
@@ -607,7 +665,9 @@ class LibraryController extends ChangeNotifier {
   Set<int> expectedVolumes(Serie serie) {
     final map = _chapterVolumeBySerie[serie.id];
     if (map == null) return {};
-    return map.values.where((v) => v > 0).toSet();
+    // Inclui o volume 0 ("Sem volume") para não esconder capítulos cujo
+    // volume é desconhecido (ex.: vindos do MangaLivre).
+    return map.values.toSet();
   }
 
   List<int> missingChapters(Serie serie, int volume) {
@@ -641,6 +701,67 @@ class LibraryController extends ChangeNotifier {
     await _placeChapter(serie, chapter, sourceCbz: path, extract: true);
     _db.chapters.put(chapter);
     await load();
+  }
+
+  /// Baixa um capítulo fantasma (faltante) pela internet usando a lógica do
+  /// baixador e o adiciona à biblioteca. Tenta o MangaDex e, se não achar,
+  /// cai para o MangaLivre. Retorna `true` quando o arquivo foi importado.
+  Future<bool> downloadGhostChapter(
+    Serie serie,
+    int volume,
+    int number,
+  ) async {
+    final service = ChapterDownloadService();
+    try {
+      final tempDir = await _downloadTempDir();
+      final result = await service.downloadChapter(
+        title: serie.title,
+        number: number,
+        outDir: tempDir.path,
+        mangadexId: serie.dexId,
+      );
+      await importGhostChapter(serie, volume, number, result.file.path);
+      try {
+        if (result.file.existsSync()) result.file.deleteSync();
+      } catch (_) {}
+      return true;
+    } finally {
+      service.dispose();
+    }
+  }
+
+  Future<Directory> _downloadTempDir() async {
+    final tmp = await getTemporaryDirectory();
+    final dir = Directory(p.join(tmp.path, 'manga_offline', 'downloads'));
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
+
+  /// Baixa **todos** os capítulos faltantes de um volume e os adiciona à
+  /// biblioteca, um a um (MangaDex → fallback MangaLivre).
+  Future<VolumeDownloadReport> downloadVolume(
+    Serie serie,
+    int volume, {
+    void Function(int done, int total, int number)? onProgress,
+  }) async {
+    final missing = missingChapters(serie, volume);
+    var downloaded = 0;
+    final failed = <int>[];
+    for (var i = 0; i < missing.length; i++) {
+      final number = missing[i];
+      onProgress?.call(i, missing.length, number);
+      try {
+        await downloadGhostChapter(serie, volume, number);
+        downloaded++;
+      } catch (_) {
+        failed.add(number);
+      }
+      if (i < missing.length - 1) {
+        await Future.delayed(const Duration(milliseconds: 700));
+      }
+    }
+    await load();
+    return VolumeDownloadReport(downloaded: downloaded, failed: failed);
   }
 
   String? volumeCoverPath(Serie serie, int volume) {

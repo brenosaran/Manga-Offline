@@ -30,7 +30,23 @@ class _SeriesScreenState extends State<SeriesScreen> {
   final Set<int> _expanded = {};
 
   @override
+  void initState() {
+    super.initState();
+    // Garante que volumes/arcos/ghosts sejam buscados ao abrir a série,
+    // mesmo quando ainda não há nenhum capítulo baixado.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.controller.expectedVolumes(widget.serie).isEmpty) {
+        widget.controller.syncVolumesOnStart();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Observa o controller para refletir volumes/arcos/ghosts assim que o
+    // sync terminar (antes, a tela só atualizava após um setState manual).
+    context.watch<LibraryController>();
     final l10n = context.watch<SettingsController>().l10n;
     return Scaffold(
       appBar: AppBar(
@@ -61,6 +77,23 @@ class _SeriesScreenState extends State<SeriesScreen> {
     }.toList();
 
     if (volumes.isEmpty) {
+      // Sem capítulos baixados: se o sync ainda está rodando, avisa; senão,
+      // mantém o estado vazio. Assim que o sync termina, os ghosts aparecem.
+      if (widget.controller.isSyncingVolumes) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                l10n.loadingChapters,
+                style: const TextStyle(color: Color(0xFF5F6368)),
+              ),
+            ],
+          ),
+        );
+      }
       return _buildEmpty(l10n);
     }
 
@@ -79,9 +112,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
       final expanded = _expanded.contains(volume);
       final missing = widget.controller.missingChapters(widget.serie, volume);
       tiles.add(_VolumeHeader(
-        label: volume == 0
-            ? l10n.noVolume
-            : '${widget.serie.title} - ${volume.toString().padLeft(4, '0')}',
+        label: _volumeLabel(volume),
         count: items.length,
         missing: missing.length,
         coverPath: widget.controller.volumeCoverPath(widget.serie, volume) ??
@@ -96,6 +127,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
             _expanded.add(volume);
           }
         }),
+        onDownload: () => _downloadVolume(volume),
         onDelete: () => _confirmDeleteVolume(volume, l10n),
       ));
       if (!expanded) continue;
@@ -112,6 +144,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
           number: number,
           volume: volume,
           l10n: l10n,
+          onDownload: () => _downloadGhost(volume, number),
           onImport: () => _importGhost(volume, number),
         ));
       }
@@ -150,6 +183,14 @@ class _SeriesScreenState extends State<SeriesScreen> {
     );
   }
 
+  /// Rótulo do volume no padrão "Nome da Obra - vol. N".
+  String _volumeLabel(int volume) {
+    if (volume <= 0) {
+      return context.read<SettingsController>().l10n.noVolume;
+    }
+    return '${widget.serie.title} - vol. $volume';
+  }
+
   Future<void> _openChapter(Chapter chapter) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -175,6 +216,128 @@ class _SeriesScreenState extends State<SeriesScreen> {
     setState(() {});
     await widget.controller.importGhostChapter(widget.serie, volume, number, path);
     if (mounted) setState(() {});
+  }
+
+  Future<void> _downloadGhost(int volume, int number) async {
+    final l10n = context.read<SettingsController>().l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Text(l10n.ghostDownloading)),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    var ok = false;
+    String? error;
+    try {
+      await widget.controller.downloadGhostChapter(widget.serie, volume, number);
+      ok = true;
+    } catch (e) {
+      error = e.toString();
+    }
+
+    if (mounted) navigator.pop();
+
+    if (mounted) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? l10n.ghostDownloadDone(number)
+                : l10n.ghostDownloadFailed(error ?? ''),
+          ),
+        ),
+      );
+      setState(() {});
+    }
+  }
+
+  Future<void> _downloadVolume(int volume) async {
+    final l10n = context.read<SettingsController>().l10n;
+    final missing = widget.controller.missingChapters(widget.serie, volume);
+    if (missing.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.volumeDownloadEmpty)),
+      );
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final progress = ValueNotifier<int>(0);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: ValueListenableBuilder<int>(
+            valueListenable: progress,
+            builder: (_, done, _) => Row(
+              children: [
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(l10n.volumeDownloading(done, missing.length)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    VolumeDownloadReport? report;
+    String? error;
+    try {
+      report = await widget.controller.downloadVolume(
+        widget.serie,
+        volume,
+        onProgress: (done, total, number) => progress.value = done,
+      );
+    } catch (e) {
+      error = e.toString();
+    }
+
+    if (mounted) navigator.pop();
+
+    if (mounted) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            error != null
+                ? l10n.volumeDownloadFailed(error)
+                : l10n.volumeDownloadDone(
+                    report!.downloaded,
+                    report.failed.length,
+                  ),
+          ),
+        ),
+      );
+      setState(() {});
+    }
   }
 
   Future<bool> _confirm(L10n l10n, String title, String message) async {
@@ -210,9 +373,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
   }
 
   Future<void> _confirmDeleteVolume(int volume, L10n l10n) async {
-    final label = volume == 0
-        ? l10n.noVolume
-        : '${widget.serie.title} - ${volume.toString().padLeft(4, '0')}';
+    final label = _volumeLabel(volume);
     final ok = await _confirm(
       l10n,
       l10n.removeVolumeTitle,
@@ -242,6 +403,7 @@ class _VolumeHeader extends StatelessWidget {
     required this.count,
     required this.missing,
     required this.onDelete,
+    required this.onDownload,
     required this.expanded,
     required this.onToggle,
     required this.l10n,
@@ -253,6 +415,7 @@ class _VolumeHeader extends StatelessWidget {
   final int count;
   final int missing;
   final VoidCallback onDelete;
+  final VoidCallback onDownload;
   final bool expanded;
   final VoidCallback onToggle;
   final L10n l10n;
@@ -308,6 +471,13 @@ class _VolumeHeader extends StatelessWidget {
                 expanded ? Icons.expand_less : Icons.expand_more,
                 color: const Color(0xFF5F6368),
               ),
+              if (missing > 0)
+                IconButton(
+                  tooltip: l10n.downloadVolumeTooltip,
+                  icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                  color: const Color(0xFF1A73E8),
+                  onPressed: onDownload,
+                ),
               IconButton(
                 tooltip: l10n.removeVolumeTitle,
                 icon: const Icon(Icons.delete_outline, size: 20),
@@ -397,12 +567,14 @@ class _GhostTile extends StatelessWidget {
   const _GhostTile({
     required this.number,
     required this.volume,
+    required this.onDownload,
     required this.onImport,
     required this.l10n,
   });
 
   final int number;
   final int volume;
+  final VoidCallback onDownload;
   final VoidCallback onImport;
   final L10n l10n;
 
@@ -443,11 +615,11 @@ class _GhostTile extends StatelessWidget {
       ),
       trailing: IconButton(
         tooltip: l10n.importThisFile,
-        icon: const Icon(Icons.file_download_outlined),
-        color: const Color(0xFF1A73E8),
+        icon: const Icon(Icons.upload_file_outlined),
+        color: const Color(0xFF5F6368),
         onPressed: onImport,
       ),
-      onTap: onImport,
+      onTap: onDownload,
     );
   }
 }
