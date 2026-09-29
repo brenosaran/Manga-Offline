@@ -809,7 +809,8 @@ class LibraryController extends ChangeNotifier {
 
   Future<void> saveChapterProgress(Chapter chapter, int pageIndex) async {
     chapter.lastPageIndex = pageIndex;
-    _db.chapters.put(chapter);
+    // Escrita assíncrona: não bloqueia a UI durante a virada de página.
+    await _db.chapters.putAsync(chapter);
     final serie = series.where((s) => s.id == chapter.serieId).firstOrNull;
     if (serie != null) {
       final chapters = chaptersOf(serie.id);
@@ -819,7 +820,7 @@ class LibraryController extends ChangeNotifier {
                 chapters.length;
       }
     }
-    refresh();
+    // Sem notifyListeners aqui: o refresh acontece ao voltar do leitor.
   }
 
   void refresh() => notifyListeners();

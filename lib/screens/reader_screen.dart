@@ -54,6 +54,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _focusNode.requestFocus();
       await _volume.enable(onNext: _nextBubble, onPrevious: _previousBubble);
+      _precacheAround(_currentPage);
     });
     _loadBubbles();
   }
@@ -138,6 +139,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final data = await BubbleData.load(widget.chapter.folderPath);
     if (!mounted) return;
     setState(() => _bubbleData = data);
+  }
+
+  /// Pré-carrega no cache as páginas vizinhas para a virada ficar fluida.
+  void _precacheAround(int page) {
+    for (var i = page - 1; i <= page + 1; i++) {
+      if (i >= 0 && i < _pageCount) {
+        precacheImage(FileImage(File(widget.chapter.pagePaths[i])), context);
+      }
+    }
   }
 
   bool get _singlePage =>
@@ -336,6 +346,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _bubbleIndex = -1;
         });
         _resetZoom();
+        _precacheAround(_currentPage);
         widget.controller.saveChapterProgress(widget.chapter, _currentPage);
       },
       itemBuilder: (context, index) => _buildSpread(_spreads[index]),
@@ -360,11 +371,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Widget _buildViewer(Widget child) {
-    return InteractiveViewer(
-      transformationController: _transform,
-      minScale: 1,
-      maxScale: 6,
-      child: child,
+    return RepaintBoundary(
+      child: InteractiveViewer(
+        transformationController: _transform,
+        minScale: 1,
+        maxScale: 6,
+        child: child,
+      ),
     );
   }
 
