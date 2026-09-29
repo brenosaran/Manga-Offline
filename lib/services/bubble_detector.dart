@@ -12,23 +12,33 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import '../core/bubble_data.dart';
 
 /// Detecção de balões/caixas de texto **offline no dispositivo** usando o
-/// modelo YOLOv8n (`assets/models/text_detector.tflite`) treinado na Fase 5.
+/// modelo YOLOv8s (`assets/models/text_detector.tflite`) treinado na Fase 5.
 ///
-/// O modelo foi exportado pelo Ultralytics com entrada **NCHW `[1,3,640,640]`**
-/// float32 normalizada (0–1) e saída **`[1,5,8400]`** (4 coords + 1 classe),
-/// coordenadas no espaço letterbox 640×640. Aqui reproduzimos o mesmo
+/// O modelo foi exportado pelo Ultralytics com entrada **NCHW `[1,3,S,S]`**
+/// float32 normalizada (0–1) e saída **`[1,5,A]`** (4 coords + 1 classe), onde
+/// `S` = [_inputSize] e `A` = [_anchors]. Aqui reproduzimos o mesmo
 /// pré-processamento (letterbox cinza 114) e mapeamos de volta para os pixels
 /// da página, aplicando NMS e a ordenação de leitura (RTL).
 class BubbleDetectionService {
   BubbleDetectionService._();
 
   static const String _asset = 'assets/models/text_detector.tflite';
-  static const int _inputSize = 640;
-  static const int _anchors = 8400;
+  static const int _inputSize = 768;
+  static final int _anchors = _anchorsFor(_inputSize);
   static const double _confThreshold = 0.25;
   static const double _iouThreshold = 0.45;
   static const double _minBoxPx = 8.0;
   static const double _minAreaFraction = 0.001;
+
+  /// Número de âncoras da cabeça do YOLO (P3/P4/P5 = strides 8/16/32).
+  static int _anchorsFor(int size) {
+    var total = 0;
+    for (final stride in const [8, 16, 32]) {
+      final k = size ~/ stride;
+      total += k * k;
+    }
+    return total;
+  }
 
   static Uint8List? _modelBytes;
 
@@ -61,7 +71,10 @@ class BubbleDetectionService {
       final pages = await Isolate.run(
         () => _detectPages(modelBytes, pagePaths),
       );
-      final root = <String, dynamic>{'version': 1, 'pages': pages};
+      final root = <String, dynamic>{
+        'version': BubbleData.currentVersion,
+        'pages': pages,
+      };
       await File(p.join(folderPath, 'bubbles.json'))
           .writeAsString(jsonEncode(root));
       return BubbleData.fromJson(root);
@@ -79,8 +92,9 @@ Map<String, dynamic> _detectPages(Uint8List modelBytes, List<String> pagePaths) 
   try {
     // Buffers reutilizados entre páginas: `run()` copia os bytes para o tensor
     // de entrada e o resultado para o buffer de saída.
-    final inputBytes = Uint8List(3 * 640 * 640 * 4);
-    final outputBytes = Uint8List(5 * 8400 * 4);
+    final inputBytes = Uint8List(
+        3 * BubbleDetectionService._inputSize * BubbleDetectionService._inputSize * 4);
+    final outputBytes = Uint8List(5 * BubbleDetectionService._anchors * 4);
     final inputFloats = inputBytes.buffer.asFloat32List();
     final outputFloats = outputBytes.buffer.asFloat32List();
 
@@ -241,39 +255,61 @@ double _iou(List<double> a, List<double> b) {
   return union <= 0 ? 0 : inter / union;
 }
 
-/// Ordena de cima para baixo e, dentro de cada "linha", da direita para a
-/// esquerda (sentido de leitura de mangá). Caixas no formato `[x, y, w, h]`.
+/// Ordem de leitura de mangá (RTL). Regra:
+/// 1. **de cima para baixo**;
+/// 2. balões numa mesma **faixa horizontal** (que se sobrepõem verticalmente)
+///    são lidos da **direita para a esquerda**;
+/// 3. balões **empilhados** (faixas distintas) são lidos de cima para baixo;
+/// 4. **balões conectados/adjacentes** entram como itens separados e seguem a
+///    mesma régua, então o volume ↓ passa pelo primeiro e depois pelo segundo.
+///
+/// Caixas no formato `[x, y, w, h]`.
 List<List<double>> orderRtl(List<List<double>> boxes) {
   if (boxes.isEmpty) return boxes;
-  final items = [...boxes]
-    ..sort((a, b) {
-      if (a[1] != b[1]) return a[1].compareTo(b[1]);
-      return b[0].compareTo(a[0]);
-    });
-  final rows = <List<List<double>>>[];
+
+  final items = [...boxes]..sort((a, b) => a[1].compareTo(b[1]));
+
+  final rows = <_ReadingRow>[];
   for (final b in items) {
-    var placed = false;
-    for (final row in rows) {
-      var rowTop = double.infinity, rowBot = -double.infinity;
-      for (final r in row) {
-        rowTop = math.min(rowTop, r[1]);
-        rowBot = math.max(rowBot, r[1] + r[3]);
-      }
-      final center = b[1] + b[3] / 2;
-      final height = rowBot - rowTop == 0 ? 1.0 : rowBot - rowTop;
-      if ((rowTop <= center && center <= rowBot) ||
-          (b[1] - rowBot) < 0.4 * height) {
-        row.add(b);
-        placed = true;
+    final top = b[1];
+    final bottom = b[1] + b[3];
+    final center = b[1] + b[3] / 2;
+    _ReadingRow? target;
+    for (final r in rows) {
+      if (center >= r.top && center <= r.bottom) {
+        target = r;
         break;
       }
     }
-    if (!placed) rows.add([b]);
+    target ??= (rows..add(_ReadingRow(top, bottom))).last;
+    target.add(b, top, bottom);
   }
+
+  rows.sort((a, b) => a.top.compareTo(b.top));
   final result = <List<double>>[];
-  for (final row in rows) {
-    row.sort((a, b) => b[0].compareTo(a[0])); // mais à direita primeiro
-    result.addAll(row);
+  for (final r in rows) {
+    r.boxes.sort((a, b) {
+      final dx = (b[0] - a[0]).abs();
+      if (dx < 1e-6) return a[1].compareTo(b[1]); // mesmo x: topo primeiro
+      return b[0].compareTo(a[0]); // direita → esquerda
+    });
+    result.addAll(r.boxes);
   }
   return result;
+}
+
+/// Faixa horizontal (linha de leitura) que agrupa balões com sobreposição
+/// vertical e é ordenada da direita para a esquerda.
+class _ReadingRow {
+  _ReadingRow(this.top, this.bottom);
+
+  double top;
+  double bottom;
+  final List<List<double>> boxes = [];
+
+  void add(List<double> box, double t, double b) {
+    boxes.add(box);
+    top = math.min(top, t);
+    bottom = math.max(bottom, b);
+  }
 }

@@ -43,5 +43,40 @@ void main() {
     test('lista vazia permanece vazia', () {
       expect(orderRtl(const []), isEmpty);
     });
+
+    test('balões empilhados (mesmo x) são lidos de cima para baixo', () {
+      final ordered = orderRtl([
+        [100, 500, 60, 60],
+        [100, 100, 60, 60],
+      ]);
+      expect(ordered, [
+        [100, 100, 60, 60],
+        [100, 500, 60, 60],
+      ]);
+    });
+
+    test('balões conectados lado a lado: o da direita vem primeiro', () {
+      final ordered = orderRtl([
+        [50, 200, 80, 80],
+        [240, 205, 80, 80],
+      ]);
+      expect(ordered.first, [240, 205, 80, 80]);
+      expect(ordered.last, [50, 200, 80, 80]);
+    });
+
+    test('linhas mistas: RTL no topo e depois a linha de baixo', () {
+      final ordered = orderRtl([
+        [300, 20, 50, 50],
+        [20, 600, 50, 50],
+        [60, 25, 50, 50],
+        [400, 610, 50, 50],
+      ]);
+      expect(ordered, [
+        [300, 20, 50, 50],
+        [60, 25, 50, 50],
+        [400, 610, 50, 50],
+        [20, 600, 50, 50],
+      ]);
+    });
   });
 }

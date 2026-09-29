@@ -61,6 +61,10 @@ class BubbleData {
 
   BubblePage? pageFor(String pagePath) => pages[p.basename(pagePath)];
 
+  /// Versão do cache `bubbles.json`. Deve ser incrementada quando o modelo de
+  /// detecção mudar, para o cache antigo ser ignorado e regerado.
+  static const int currentVersion = 2;
+
   static BubbleData fromJson(Map<String, dynamic> root) {
     final pages = <String, BubblePage>{};
     final raw = root['pages'] as Map<String, dynamic>? ?? const {};
@@ -75,6 +79,7 @@ class BubbleData {
     if (!await file.exists()) return null;
     try {
       final root = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      if ((root['version'] as num?)?.toInt() != currentVersion) return null;
       return fromJson(root);
     } catch (_) {
       return null;
