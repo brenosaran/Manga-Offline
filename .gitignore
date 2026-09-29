@@ -47,10 +47,17 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# --- Não publicar (conteúdo/ferramentas locais) ---
+# --- Nï¿½o publicar (conteï¿½do/ferramentas locais) ---
 /downloads/
 /bin/download_mangadex.dart
 /test/downloader_test.dart
 /test/mangalivre_test.dart
 /lib/downloader/
 /android/build/
+
+# --- Artefatos de treino de ML (fora do app) ---
+/runs/
+/dataset/
+*.pt
+*.onnx
+*.tflite
