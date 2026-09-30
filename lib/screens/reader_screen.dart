@@ -379,9 +379,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             children: [
               _buildPages(),
               _buildBubbleOverlay(),
-              _buildDetectingBanner(context),
               _buildTopBar(context),
               _buildBottomBar(context),
+              _buildDetectingBanner(context),
             ],
           ),
         ),
@@ -471,31 +471,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
       left: 0,
       right: 0,
       child: SafeArea(
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.only(top: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 56),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  l10n.readerDetectingBubbles,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Text(
+                    l10n.readerDetectingBubbles,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
