@@ -263,61 +263,138 @@ double _iou(List<double> a, List<double> b) {
   return union <= 0 ? 0 : inter / union;
 }
 
-/// Ordem de leitura de mangá (RTL). Regra:
-/// 1. **de cima para baixo**;
-/// 2. balões numa mesma **faixa horizontal** (que se sobrepõem verticalmente)
-///    são lidos da **direita para a esquerda**;
-/// 3. balões **empilhados** (faixas distintas) são lidos de cima para baixo;
-/// 4. **balões conectados/adjacentes** entram como itens separados e seguem a
-///    mesma régua, então o volume ↓ passa pelo primeiro e depois pelo segundo.
+/// Ordem de leitura de mangá (RTL) por **corte XY recursivo** (recursive XY-cut),
+/// o método usado por Kovanen & Aizawa ([panel-order-estimator], Manga109) e
+/// pelo panelforge. É mais robusto que agrupar por "faixas" porque:
+/// 1. corta a página primeiro em **linhas** (maior lacuna horizontal) e depois em
+///    **colunas** (lacuna vertical), recursivamente;
+/// 2. dentro de uma faixa, as colunas são visitadas da **direita para a
+///    esquerda**;
+/// 3. sem lacuna limpa, tolera sobreposições crescentes e, no limite, ordena
+///    pelo centro (de cima para baixo e da direita para a esquerda).
 ///
 /// Caixas no formato `[x, y, w, h]`.
 List<List<double>> orderRtl(List<List<double>> boxes) {
   if (boxes.isEmpty) return boxes;
+  final order = _xyCut(boxes, List<int>.generate(boxes.length, (i) => i));
+  return [for (final i in order) boxes[i]];
+}
 
-  final items = [...boxes]..sort((a, b) => a[1].compareTo(b[1]));
+List<int> _xyCut(List<List<double>> boxes, List<int> idx) {
+  if (idx.length <= 1) return List<int>.of(idx);
 
-  final rows = <_ReadingRow>[];
-  for (final b in items) {
-    final top = b[1];
-    final bottom = b[1] + b[3];
-    final center = b[1] + b[3] / 2;
-    _ReadingRow? target;
-    for (final r in rows) {
-      if (center >= r.top && center <= r.bottom) {
-        target = r;
-        break;
+  final spanH = _maxOf(idx, (i) => boxes[i][1] + boxes[i][3]) -
+      _minOf(idx, (i) => boxes[i][1]);
+  final spanV = _maxOf(idx, (i) => boxes[i][0] + boxes[i][2]) -
+      _minOf(idx, (i) => boxes[i][0]);
+
+  var cuts = const <double>[];
+  var axis = 'h';
+  // Tolerâncias crescentes para sobreposições (balões/quadros encostados).
+  outer:
+  for (final tolFrac in const [0.0, 0.02, 0.05, 0.1]) {
+    for (final ax in const ['h', 'v']) {
+      final span = ax == 'h' ? spanH : spanV;
+      final intervals = <List<double>>[
+        for (final i in idx)
+          ax == 'h'
+              ? [boxes[i][1], boxes[i][1] + boxes[i][3]]
+              : [boxes[i][0], boxes[i][0] + boxes[i][2]],
+      ];
+      final g = _gaps(intervals, tolFrac * span);
+      if (g.isNotEmpty) {
+        cuts = g;
+        axis = ax;
+        break outer;
       }
     }
-    target ??= (rows..add(_ReadingRow(top, bottom))).last;
-    target.add(b, top, bottom);
   }
 
-  rows.sort((a, b) => a.top.compareTo(b.top));
-  final result = <List<double>>[];
-  for (final r in rows) {
-    r.boxes.sort((a, b) {
-      final dx = (b[0] - a[0]).abs();
-      if (dx < 1e-6) return a[1].compareTo(b[1]); // mesmo x: topo primeiro
-      return b[0].compareTo(a[0]); // direita → esquerda
+  if (cuts.isNotEmpty) {
+    final groups = List<List<int>>.generate(cuts.length + 1, (_) => <int>[]);
+    for (final i in idx) {
+      final center = axis == 'h'
+          ? boxes[i][1] + boxes[i][3] / 2
+          : boxes[i][0] + boxes[i][2] / 2;
+      groups[_searchSorted(cuts, center)].add(i);
+    }
+    var nonEmpty = [for (final g in groups) if (g.isNotEmpty) g];
+    // Um corte que não separou nada recursaria para sempre: ignora.
+    if (nonEmpty.length > 1) {
+      // Colunas (corte vertical) em RTL: a da direita primeiro.
+      if (axis == 'v') nonEmpty = nonEmpty.reversed.toList();
+      final out = <int>[];
+      for (final g in nonEmpty) {
+        out.addAll(_xyCut(boxes, g));
+      }
+      return out;
+    }
+  }
+
+  // Sem corte limpo: ordena pelo centro (topo→base; direita→esquerda).
+  return List<int>.of(idx)
+    ..sort((a, b) {
+      final cy = (boxes[a][1] + boxes[a][3] / 2)
+          .compareTo(boxes[b][1] + boxes[b][3] / 2);
+      if (cy != 0) return cy;
+      return (boxes[b][0] + boxes[b][2] / 2)
+          .compareTo(boxes[a][0] + boxes[a][2] / 2);
     });
-    result.addAll(r.boxes);
-  }
-  return result;
 }
 
-/// Faixa horizontal (linha de leitura) que agrupa balões com sobreposição
-/// vertical e é ordenada da direita para a esquerda.
-class _ReadingRow {
-  _ReadingRow(this.top, this.bottom);
-
-  double top;
-  double bottom;
-  final List<List<double>> boxes = [];
-
-  void add(List<double> box, double t, double b) {
-    boxes.add(box);
-    top = math.min(top, t);
-    bottom = math.max(bottom, b);
+/// Posições de corte no meio das lacunas entre intervalos mesclados.
+/// Intervalos que se sobrepõem por mais de [tol] são mesclados.
+List<double> _gaps(List<List<double>> intervals, double tol) {
+  if (intervals.isEmpty) return const [];
+  final sorted = List<List<double>>.of(intervals)
+    ..sort((a, b) => a[0].compareTo(b[0]));
+  final merged = <List<double>>[
+    [sorted[0][0], sorted[0][1]],
+  ];
+  for (var k = 1; k < sorted.length; k++) {
+    final a = sorted[k][0];
+    final b = sorted[k][1];
+    if (a <= merged.last[1] - tol) {
+      if (b > merged.last[1]) merged.last[1] = b;
+    } else {
+      merged.add([a, b > merged.last[1] ? b : merged.last[1]]);
+    }
   }
+  return [
+    for (var i = 0; i < merged.length - 1; i++)
+      (merged[i][1] + merged[i + 1][0]) / 2,
+  ];
 }
+
+/// Índice de inserção de [value] em [cuts] (mantém a ordem; `searchsorted`).
+int _searchSorted(List<double> cuts, double value) {
+  var lo = 0, hi = cuts.length;
+  while (lo < hi) {
+    final mid = (lo + hi) >> 1;
+    if (cuts[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+double _minOf(List<int> idx, double Function(int) f) {
+  var m = f(idx.first);
+  for (final i in idx) {
+    final v = f(i);
+    if (v < m) m = v;
+  }
+  return m;
+}
+
+double _maxOf(List<int> idx, double Function(int) f) {
+  var m = f(idx.first);
+  for (final i in idx) {
+    final v = f(i);
+    if (v > m) m = v;
+  }
+  return m;
+}
+

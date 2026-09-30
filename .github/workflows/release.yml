@@ -14,8 +14,26 @@ env:
   FLUTTER_VERSION: '3.47.5'
 
 jobs:
+  test:
+    name: Testes (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Testes do detector de balões e layout
+        run: flutter test test/bubble_detector_test.dart test/reading_layout_test.dart
+
   android:
     name: Android APK
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +68,7 @@ jobs:
 
   windows:
     name: Windows (desktop)
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

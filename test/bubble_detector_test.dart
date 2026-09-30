@@ -78,5 +78,20 @@ void main() {
         [20, 600, 50, 50],
       ]);
     });
+
+    test('escada: coluna alta à direita vem antes dos balões à esquerda', () {
+      // O agrupamento por "faixas" antigo ordenava B antes de A (centros em
+      // linhas diferentes); o corte XY recursivo respeita a coluna da direita.
+      final ordered = orderRtl([
+        [600, 10, 40, 200], // A: coluna à direita
+        [10, 10, 40, 40], // B: topo-esquerda
+        [10, 300, 40, 40], // C: base-esquerda
+      ]);
+      expect(ordered, [
+        [600, 10, 40, 200],
+        [10, 10, 40, 40],
+        [10, 300, 40, 40],
+      ]);
+    });
   });
 }
