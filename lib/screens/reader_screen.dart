@@ -41,6 +41,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   List<PageSpread> _spreads = const [];
   BubbleData? _bubbleData;
   int _bubbleIndex = -1;
+  bool _detecting = false;
 
   int get _pageCount => widget.chapter.pagePaths.length;
 
@@ -139,18 +140,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
   /// aparelho com o modelo `.tflite` e grava o cache.
   Future<void> _loadBubbles() async {
     var data = await BubbleData.load(widget.chapter.folderPath);
-    debugPrint('[BUBBLE] cache=${data != null} suportado=${BubbleDetectionService.isSupported}');
     if (data == null && BubbleDetectionService.isSupported) {
+      if (mounted) setState(() => _detecting = true);
       data = await BubbleDetectionService.detectAndCache(
         folderPath: widget.chapter.folderPath,
         pagePaths: widget.chapter.pagePaths,
       );
+      debugPrint('[BUBBLE] detecção terminou: ${data?.pages.length} páginas');
     }
     if (!mounted) return;
-    final first = data?.pageFor(widget.chapter.pagePaths.first);
-    debugPrint('[BUBBLE] _bubbleData=${data != null} '
-        'paginas=${data?.pages.length} 1aPaginaBalões=${first?.bubbles.length}');
-    setState(() => _bubbleData = data);
+    setState(() {
+      _detecting = false;
+      _bubbleData = data;
+    });
   }
 
   /// Pré-carrega no cache as páginas vizinhas para a virada ficar fluida.
@@ -178,6 +180,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   /// Avança pelo próximo balão; ao terminar os balões, vira a página.
   void _nextBubble() {
+    // Enquanto detecta balões, não navega (evita virar a página por engano).
+    if (_detecting) return;
     if (!_singlePage) {
       _nextPage();
       return;
@@ -194,6 +198,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   /// Volta pelo balão anterior; no início, volta para a página inteira e depois
   /// para a página anterior.
   void _previousBubble() {
+    if (_detecting) return;
     if (!_singlePage) {
       _previousPage();
       return;
@@ -374,6 +379,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             children: [
               _buildPages(),
               _buildBubbleOverlay(),
+              _buildDetectingBanner(context),
               _buildTopBar(context),
               _buildBottomBar(context),
             ],
@@ -450,6 +456,48 @@ class _ReaderScreenState extends State<ReaderScreen> {
         errorBuilder: (_, _, _) => const Center(
           child: Icon(Icons.broken_image_outlined,
               color: Colors.white38, size: 48),
+        ),
+      ),
+    );
+  }
+
+  /// Aviso flutuante enquanto os balões do capítulo são detectados no aparelho
+  /// (a primeira leitura de um capítulo pode levar alguns segundos).
+  Widget _buildDetectingBanner(BuildContext context) {
+    if (!_detecting) return const SizedBox.shrink();
+    final l10n = context.read<SettingsController>().l10n;
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  l10n.readerDetectingBubbles,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

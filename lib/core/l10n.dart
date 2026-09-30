@@ -55,6 +55,7 @@ class L10n {
   String arc(String name) => 'Arco: $name';
 
   String get readerVolumeHint => '↓ próximo balão · ↑ anterior · cantos: página';
+  String get readerDetectingBubbles => 'Detectando balões…';
   String readerPageOf(int a, int b) => 'Página $a de $b';
   String readerSpreadOf(int a, int b, int total) =>
       'Páginas $a–$b de $total';
@@ -216,6 +217,8 @@ class En extends L10n {
 
   @override
   String get readerVolumeHint => '↓ next bubble · ↑ previous · corners: page';
+  @override
+  String get readerDetectingBubbles => 'Detecting speech bubbles…';
   @override
   String readerPageOf(int a, int b) => 'Page $a of $b';
   @override
