@@ -11,21 +11,36 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 
 import '../core/bubble_data.dart';
 
-/// Detecção de balões/caixas de texto **offline no dispositivo** usando o
-/// modelo YOLOv8s (`assets/models/text_detector.tflite`) treinado na Fase 5.
+/// Detecção de balões de fala e caixas de narração **offline no dispositivo**
+/// usando o modelo YOLO11s (`assets/models/balloon_detector.tflite`) treinado
+/// com One Piece (9.915 páginas) para 3 classes.
 ///
 /// O modelo foi exportado pelo Ultralytics com entrada **NCHW `[1,3,S,S]`**
-/// float32 normalizada (0–1) e saída **`[1,5,A]`** (4 coords + 1 classe), onde
-/// `S` = [_inputSize] e `A` = [_anchors]. Aqui reproduzimos o mesmo
-/// pré-processamento (letterbox cinza 114) e mapeamos de volta para os pixels
-/// da página, aplicando NMS e a ordenação de leitura (RTL).
+/// float32 normalizada (0–1) e saída **`[1,4+C,A]`** (4 coords + `C` classes),
+/// onde `S` = [_inputSize], `A` = [_anchors] e as classes são
+/// `0 = balão de fala`, `1 = narração` e `2 = texto`. As coordenadas saem
+/// normalizadas em [0,1] (relativas ao quadro de entrada), no formato
+/// centro + largura/altura (`cx, cy, w, h`).
+///
+/// Aqui reproduzimos o mesmo pré-processamento (letterbox cinza 114),
+/// aplicamos NMS por grupo e mantemos apenas balões/narrações que **contêm
+/// texto** (um balão sem texto detectado não é exibido), devolvendo as caixas
+/// mapeadas para os pixels da página e ordenadas no sentido de leitura (RTL).
 class BubbleDetectionService {
   BubbleDetectionService._();
 
-  static const String _asset = 'assets/models/text_detector.tflite';
+  static const String _asset = 'assets/models/balloon_detector.tflite';
   static const int _inputSize = 768;
   static final int _anchors = _anchorsFor(_inputSize);
+
+  /// Classes do modelo: 0 = balão de fala, 1 = narração, 2 = texto.
+  static const int _classCount = 3;
+  static const int _numChannels = 4 + _classCount;
   static const double _confThreshold = 0.25;
+
+  /// Limiar mais baixo para o texto: ele só serve para confirmar que um balão
+  /// tem conteúdo, então preferimos pecar por excesso a descartar balões.
+  static const double _textConfThreshold = 0.15;
   static const double _iouThreshold = 0.45;
   static const double _minBoxPx = 8.0;
   static const double _minAreaFraction = 0.001;
@@ -94,7 +109,8 @@ Map<String, dynamic> _detectPages(Uint8List modelBytes, List<String> pagePaths) 
     // de entrada e o resultado para o buffer de saída.
     final inputBytes = Uint8List(
         3 * BubbleDetectionService._inputSize * BubbleDetectionService._inputSize * 4);
-    final outputBytes = Uint8List(5 * BubbleDetectionService._anchors * 4);
+    final outputBytes = Uint8List(
+        BubbleDetectionService._numChannels * BubbleDetectionService._anchors * 4);
     final inputFloats = inputBytes.buffer.asFloat32List();
     final outputFloats = outputBytes.buffer.asFloat32List();
 
@@ -172,48 +188,73 @@ Map<String, dynamic>? _detectOne(
 
   interpreter.run(inputBytes, outputBytes);
 
-  // Saída [1,5,A] (A = _anchors = 12096 no input 768): índice = atributo * A +
-  // âncora. As coordenadas do modelo saem normalizadas em [0,1] (relativas ao
-  // _inputSize×_inputSize de entrada), então voltamos para pixels antes de
-  // desfazer o letterbox.
+  // Saída [1,4+C,A] (C = 3 classes, A = _anchors = 12096 no input 768):
+  // índice = atributo * A + âncora. As 4 primeiras linhas são as coordenadas
+  // (cx, cy, w, h) normalizadas em [0,1] (relativas ao quadro de entrada) e as
+  // seguintes são as pontuações das classes (balão, narração, texto).
+  final anchors = BubbleDetectionService._anchors;
+  final inputSizeD = BubbleDetectionService._inputSize.toDouble();
   final boxes = <List<double>>[];
   final scores = <double>[];
-  final inputSizeD = BubbleDetectionService._inputSize.toDouble();
-  for (var a = 0; a < BubbleDetectionService._anchors; a++) {
-    final conf = outputFloats[4 * BubbleDetectionService._anchors + a];
-    if (conf < BubbleDetectionService._confThreshold) continue;
-    boxes.add([
-      outputFloats[a] * inputSizeD,
-      outputFloats[BubbleDetectionService._anchors + a] * inputSizeD,
-      outputFloats[2 * BubbleDetectionService._anchors + a] * inputSizeD,
-      outputFloats[3 * BubbleDetectionService._anchors + a] * inputSizeD,
-    ]);
-    scores.add(conf);
+  final texts = <List<double>>[];
+  final textScores = <double>[];
+  for (var a = 0; a < anchors; a++) {
+    final cx = outputFloats[a] * inputSizeD;
+    final cy = outputFloats[anchors + a] * inputSizeD;
+    final bw = outputFloats[2 * anchors + a] * inputSizeD;
+    final bh = outputFloats[3 * anchors + a] * inputSizeD;
+    final balloon = outputFloats[4 * anchors + a];
+    final narration = outputFloats[5 * anchors + a];
+    final text = outputFloats[6 * anchors + a];
+    // Balão e narração são mutuamente exclusivos: fica a maior pontuação.
+    final bubbleConf = balloon > narration ? balloon : narration;
+    if (bubbleConf >= BubbleDetectionService._confThreshold) {
+      boxes.add([cx, cy, bw, bh]);
+      scores.add(bubbleConf);
+    }
+    if (text >= BubbleDetectionService._textConfThreshold) {
+      texts.add([cx, cy, bw, bh]);
+      textScores.add(text);
+    }
   }
 
   final kept = nms(boxes, scores, BubbleDetectionService._iouThreshold);
+  final keptTexts = nms(texts, textScores, BubbleDetectionService._iouThreshold);
 
   final pageArea = (w * h).toDouble();
-  final mapped = <List<double>>[];
-  for (final b in kept) {
-    final x1 = (b[0] - b[2] / 2 - padX) / effectiveRatio;
-    final y1 = (b[1] - b[3] / 2 - padY) / effectiveRatio;
-    final x2 = (b[0] + b[2] / 2 - padX) / effectiveRatio;
-    final y2 = (b[1] + b[3] / 2 - padY) / effectiveRatio;
-    final cx1 = x1.clamp(0.0, w.toDouble());
-    final cy1 = y1.clamp(0.0, h.toDouble());
-    final cx2 = x2.clamp(0.0, w.toDouble());
-    final cy2 = y2.clamp(0.0, h.toDouble());
-    final bw = cx2 - cx1;
-    final bh = cy2 - cy1;
-    if (bw < BubbleDetectionService._minBoxPx ||
-        bh < BubbleDetectionService._minBoxPx) {
-      continue;
+  List<List<double>> buildMapped({required bool requireText}) {
+    final out = <List<double>>[];
+    for (final b in kept) {
+      // "Sem texto, não é balão": descarta caixas sem nenhum texto dentro.
+      if (requireText && !_containsText(b, keptTexts)) continue;
+      final x1 = (b[0] - b[2] / 2 - padX) / effectiveRatio;
+      final y1 = (b[1] - b[3] / 2 - padY) / effectiveRatio;
+      final x2 = (b[0] + b[2] / 2 - padX) / effectiveRatio;
+      final y2 = (b[1] + b[3] / 2 - padY) / effectiveRatio;
+      final cx1 = x1.clamp(0.0, w.toDouble());
+      final cy1 = y1.clamp(0.0, h.toDouble());
+      final cx2 = x2.clamp(0.0, w.toDouble());
+      final cy2 = y2.clamp(0.0, h.toDouble());
+      final bw = cx2 - cx1;
+      final bh = cy2 - cy1;
+      if (bw < BubbleDetectionService._minBoxPx ||
+          bh < BubbleDetectionService._minBoxPx) {
+        continue;
+      }
+      if ((bw * bh) / pageArea < BubbleDetectionService._minAreaFraction) {
+        continue;
+      }
+      out.add([cx1, cy1, bw, bh]);
     }
-    if ((bw * bh) / pageArea < BubbleDetectionService._minAreaFraction) {
-      continue;
-    }
-    mapped.add([cx1, cy1, bw, bh]);
+    return out;
+  }
+
+  var mapped = buildMapped(requireText: true);
+  // Rede de segurança: se o filtro derrubou TODAS as caixas (ex.: nenhum texto
+  // reconhecido nesta página), mantém as caixas brutas em vez de devolver a
+  // página sem balões nenhum.
+  if (mapped.isEmpty && kept.isNotEmpty) {
+    mapped = buildMapped(requireText: false);
   }
 
   final ordered = orderRtl(mapped);
@@ -225,6 +266,17 @@ Map<String, dynamic>? _detectOne(
         {'x': b[0], 'y': b[1], 'w': b[2], 'h': b[3]},
     ],
   };
+}
+
+/// `true` se o centro de algum texto em [texts] cair dentro da caixa [box].
+/// Caixas no formato `[cx, cy, w, h]` (centro + tamanho).
+bool _containsText(List<double> box, List<List<double>> texts) {
+  final x1 = box[0] - box[2] / 2, y1 = box[1] - box[3] / 2;
+  final x2 = box[0] + box[2] / 2, y2 = box[1] + box[3] / 2;
+  for (final t in texts) {
+    if (t[0] >= x1 && t[0] <= x2 && t[1] >= y1 && t[1] <= y2) return true;
+  }
+  return false;
 }
 
 /// Non-Maximum Suppression sobre caixas `[cx, cy, w, h]`.
