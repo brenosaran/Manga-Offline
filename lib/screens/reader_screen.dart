@@ -139,6 +139,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   /// aparelho com o modelo `.tflite` e grava o cache.
   Future<void> _loadBubbles() async {
     var data = await BubbleData.load(widget.chapter.folderPath);
+    debugPrint('[BUBBLE] cache=${data != null} suportado=${BubbleDetectionService.isSupported}');
     if (data == null && BubbleDetectionService.isSupported) {
       data = await BubbleDetectionService.detectAndCache(
         folderPath: widget.chapter.folderPath,
@@ -146,6 +147,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
       );
     }
     if (!mounted) return;
+    final first = data?.pageFor(widget.chapter.pagePaths.first);
+    debugPrint('[BUBBLE] _bubbleData=${data != null} '
+        'paginas=${data?.pages.length} 1aPaginaBalões=${first?.bubbles.length}');
     setState(() => _bubbleData = data);
   }
 

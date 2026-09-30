@@ -63,7 +63,7 @@ class BubbleData {
 
   /// Versão do cache `bubbles.json`. Deve ser incrementada quando o modelo de
   /// detecção mudar, para o cache antigo ser ignorado e regerado.
-  static const int currentVersion = 3;
+  static const int currentVersion = 4;
 
   static BubbleData fromJson(Map<String, dynamic> root) {
     final pages = <String, BubblePage>{};

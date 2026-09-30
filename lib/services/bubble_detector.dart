@@ -68,6 +68,7 @@ class BubbleDetectionService {
     if (cached != null) return cached;
     final data = await rootBundle.load(_asset);
     final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    debugPrint('[BUBBLE] modelo carregado: ${bytes.length} bytes');
     _modelBytes = bytes;
     return bytes;
   }
@@ -82,10 +83,12 @@ class BubbleDetectionService {
   }) async {
     if (!isSupported || pagePaths.isEmpty) return null;
     try {
+      debugPrint('[BUBBLE] iniciando detecção de ${pagePaths.length} páginas');
       final modelBytes = await _loadModel();
       final pages = await Isolate.run(
         () => _detectPages(modelBytes, pagePaths),
       );
+      debugPrint('[BUBBLE] detecção concluída: ${pages.length} páginas');
       final root = <String, dynamic>{
         'version': BubbleData.currentVersion,
         'pages': pages,
@@ -93,8 +96,8 @@ class BubbleDetectionService {
       await File(p.join(folderPath, 'bubbles.json'))
           .writeAsString(jsonEncode(root));
       return BubbleData.fromJson(root);
-    } catch (e) {
-      debugPrint('BubbleDetectionService: falha na detecção — $e');
+    } catch (e, s) {
+      debugPrint('[BUBBLE] FALHA na detecção — $e\n$s');
       return null;
     }
   }
@@ -104,6 +107,8 @@ class BubbleDetectionService {
 
 Map<String, dynamic> _detectPages(Uint8List modelBytes, List<String> pagePaths) {
   final interpreter = Interpreter.fromBuffer(modelBytes);
+  debugPrint('[BUBBLE] interpretador OK: in=${interpreter.getInputTensor(0).shape} '
+      'out=${interpreter.getOutputTensor(0).shape}');
   try {
     // Buffers reutilizados entre páginas: `run()` copia os bytes para o tensor
     // de entrada e o resultado para o buffer de saída.
@@ -257,6 +262,8 @@ Map<String, dynamic>? _detectOne(
     mapped = buildMapped(requireText: false);
   }
 
+  debugPrint('[BUBBLE] $path cand=${boxes.length} texto=${texts.length} '
+      'nms=${kept.length} nmsTexto=${keptTexts.length} mapped=${mapped.length}');
   final ordered = orderRtl(mapped);
   return {
     'w': w,
