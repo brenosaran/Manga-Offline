@@ -124,8 +124,15 @@ Map<String, dynamic>? _detectOne(
   Float32List outputFloats,
   String path,
 ) {
-  final decoded = img.decodeImage(File(path).readAsBytesSync());
+  var decoded = img.decodeImage(File(path).readAsBytesSync());
   if (decoded == null) return null;
+  // O pacote `image` 4.10.1 decodifica PNG em tons de cinza com os canais
+  // verde/azul zerados (`setRgb(cinza, 0, 0)`), o que faz o modelo receber uma
+  // imagem "vermelha" e detectar **zero** balões. Normalizamos para 3 canais
+  // (R=G=B=cinza) antes do letterbox. Ver image/lib/src/formats/png_decoder.dart.
+  if (decoded.numChannels != 3) {
+    decoded = decoded.convert(numChannels: 3);
+  }
   final w = decoded.width;
   final h = decoded.height;
   if (w <= 0 || h <= 0) return null;
@@ -165,9 +172,10 @@ Map<String, dynamic>? _detectOne(
 
   interpreter.run(inputBytes, outputBytes);
 
-  // Saída [1,5,8400]: índice = atributo * 8400 + âncora. As coordenadas do
-  // modelo saem normalizadas em [0,1] (relativas ao 640×640 de entrada), então
-  // voltamos para pixels antes de desfazer o letterbox.
+  // Saída [1,5,A] (A = _anchors = 12096 no input 768): índice = atributo * A +
+  // âncora. As coordenadas do modelo saem normalizadas em [0,1] (relativas ao
+  // _inputSize×_inputSize de entrada), então voltamos para pixels antes de
+  // desfazer o letterbox.
   final boxes = <List<double>>[];
   final scores = <double>[];
   final inputSizeD = BubbleDetectionService._inputSize.toDouble();
