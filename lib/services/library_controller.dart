@@ -16,6 +16,7 @@ import 'archive_service.dart';
 import 'bubble_detector.dart';
 import 'chapter_download_service.dart';
 import 'database_service.dart';
+import 'malsync_service.dart';
 import 'mangadex_service.dart';
 import 'metadata_service.dart';
 import 'onepiece_service.dart';
@@ -55,17 +56,20 @@ class LibraryController extends ChangeNotifier {
     MetadataService? metadataService,
     MangaDexService? mangaDexService,
     OnePieceService? onePieceService,
+    MalsyncService? malsyncService,
   })  : _db = database ?? DatabaseService.instance,
         _archive = archiveService ?? ArchiveService(),
         _metadata = metadataService ?? MetadataService(),
         _dex = mangaDexService ?? MangaDexService(),
-        _onePiece = onePieceService ?? OnePieceService();
+        _onePiece = onePieceService ?? OnePieceService(),
+        _malsync = malsyncService ?? MalsyncService();
 
   final DatabaseService _db;
   final ArchiveService _archive;
   final MetadataService _metadata;
   final MangaDexService _dex;
   final OnePieceService _onePiece;
+  final MalsyncService _malsync;
 
   List<Serie> series = [];
   final Map<int, int> chapterCount = {};
@@ -503,6 +507,38 @@ class LibraryController extends ChangeNotifier {
     return bestScore >= 0.8 ? best : null;
   }
 
+  /// Resolve o id da obra no MangaDex, nesta ordem:
+  /// 1. **`links.al`** do MangaDex == `sourceId` (AniList) — vínculo exato;
+  /// 2. **MALSync** (`idMal` → `Sites.Mangadex`) — dicionário de IDs;
+  /// 3. **semelhança de título** — último recurso.
+  ///
+  /// O resultado é gravado em `Serie.dexId`, então a próxima execução não
+  /// repete a consulta.
+  Future<String?> _resolveDexId(Serie serie) async {
+    final anilistId = serie.sourceId;
+    if (anilistId != null && anilistId.isNotEmpty) {
+      try {
+        final exact = await _dex.findByAnilistId(
+          title: serie.title,
+          anilistId: anilistId,
+        );
+        if (exact != null) return exact.id;
+      } catch (_) {}
+      try {
+        final malId = await _metadata.anilistIdMal(anilistId);
+        if (malId != null) {
+          final dexId = await _malsync.mangadexIdForMal(malId);
+          if (dexId != null && dexId.isNotEmpty) return dexId;
+        }
+      } catch (_) {}
+    }
+    try {
+      final byTitle = await _dex.findByTitle(serie.title);
+      if (byTitle != null) return byTitle.id;
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> _syncVolumes() async {
     if (isSyncingVolumes) return;
     isSyncingVolumes = true;
@@ -515,14 +551,12 @@ class LibraryController extends ChangeNotifier {
 
         var dexId = serie.dexId;
         if (dexId == null || dexId.isEmpty) {
-          try {
-            final match = await _dex.findByTitle(serie.title);
-            if (match != null) {
-              dexId = match.id;
-              serie.dexId = dexId;
-              _db.series.put(serie);
-            }
-          } catch (_) {}
+          final resolved = await _resolveDexId(serie);
+          if (resolved != null) {
+            dexId = resolved;
+            serie.dexId = dexId;
+            _db.series.put(serie);
+          }
         }
 
         try {

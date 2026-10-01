@@ -137,6 +137,24 @@ query ($id: Int, $perPage: Int) {
 }
 ''';
 
+  static const String _idMalQuery = r'''
+query ($id: Int) { Media(id: $id, type: MANGA) { idMal } }
+''';
+
+  /// ID do MyAnimeList (MAL) da obra na AniList — usado para consultar o
+  /// MALSync (que é indexado por MAL id). Retorna `null` se não houver.
+  Future<int?> anilistIdMal(String anilistId) async {
+    final numericId = int.tryParse(anilistId);
+    if (numericId == null) return null;
+    try {
+      final data = await _postGraphql(_idMalQuery, {'id': numericId});
+      final media = data?['Media'] as Map<String, dynamic>?;
+      return (media?['idMal'] as num?)?.toInt();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<CatalogEntry>> recommendations(String id, {int limit = 12}) async {
     final numericId = int.tryParse(id);
     if (numericId == null) return [];

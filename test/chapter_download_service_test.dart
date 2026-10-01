@@ -63,10 +63,10 @@ void main() {
   });
 
   group('mangaLivreUrlFor', () {
-    test('monta a URL no padrão do site', () {
+    test('monta a URL no padrão do site (sem sufixo -ptbr)', () {
       expect(
         mangaLivreUrlFor('One Piece'),
-        'https://mangalivre.to/manga/one-piece-ptbr/',
+        'https://mangalivre.to/manga/one-piece/',
       );
     });
 

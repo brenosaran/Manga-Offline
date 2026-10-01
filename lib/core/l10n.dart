@@ -116,6 +116,15 @@ class L10n {
   String get languagePortuguese => 'Português';
   String get languageEnglish => 'English';
 
+  String get devSection => 'Desenvolvedor';
+  String get searchSourcesTitle => 'Servidores de busca';
+  String get searchSourcesSubtitle =>
+      'Lista de servidores usados nos testes de build (padrão: os já configurados).';
+  String get searchSourcesHint => 'servidorpessoal.com';
+  String get searchSourcesAdd => 'Adicionar';
+  String get searchSourcesReset => 'Restaurar padrão';
+  String get searchSourcesEmpty => 'Nenhum servidor configurado.';
+
   String get loading => 'Carregando...';
 }
 
@@ -320,6 +329,22 @@ class En extends L10n {
   String get languagePortuguese => 'Português';
   @override
   String get languageEnglish => 'English';
+
+  @override
+  String get devSection => 'Developer';
+  @override
+  String get searchSourcesTitle => 'Search servers';
+  @override
+  String get searchSourcesSubtitle =>
+      'Servers used in build tests (default: the already-configured ones).';
+  @override
+  String get searchSourcesHint => 'servidorpessoal.com';
+  @override
+  String get searchSourcesAdd => 'Add';
+  @override
+  String get searchSourcesReset => 'Restore defaults';
+  @override
+  String get searchSourcesEmpty => 'No server configured.';
 
   @override
   String get loading => 'Loading...';

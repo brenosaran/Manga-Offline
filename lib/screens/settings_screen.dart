@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/l10n.dart';
 import '../core/settings_controller.dart';
+
+/// Idiomas oferecidos por servidor (filtro/preferência de idioma).
+const List<String> _languages = <String>['pt-br', 'en', 'es', 'fr', 'ja'];
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -98,6 +102,161 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(l10n.supportedFormats),
             subtitle: Text(l10n.supportedFormatsValue),
           ),
+          if (kDebugMode) ...[
+            const Divider(height: 1),
+            _SectionHeader(l10n.devSection),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: Text(l10n.searchSourcesTitle),
+              subtitle: Text(l10n.searchSourcesSubtitle),
+            ),
+            if (settings.searchSources.isEmpty)
+              ListTile(
+                leading: const Icon(Icons.warning_amber_outlined),
+                title: Text(l10n.searchSourcesEmpty),
+              ),
+            if (settings.searchSources.isNotEmpty)
+              ReorderableListView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                buildDefaultDragHandles: false,
+                onReorder: settings.reorderSearchSource,
+                children: [
+                  for (var i = 0; i < settings.searchSources.length; i++)
+                    ListTile(
+                      key: ValueKey(settings.searchSources[i].url),
+                      dense: true,
+                      leading: ReorderableDragStartListener(
+                        index: i,
+                        child: const Icon(Icons.drag_handle),
+                      ),
+                      title: Text('${i + 1}. ${settings.searchSources[i].url}'),
+                      subtitle: DropdownButton<String>(
+                        value: settings.searchSources[i].language,
+                        isDense: true,
+                        underline: const SizedBox.shrink(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            settings.setSearchSourceLanguage(
+                              settings.searchSources[i].url,
+                              value,
+                            );
+                          }
+                        },
+                        items: [
+                          for (final lang in _languages)
+                            DropdownMenuItem(value: lang, child: Text(lang)),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            value: settings.searchSources[i].enabled,
+                            onChanged: (value) =>
+                                settings.setSearchSourceEnabled(
+                              settings.searchSources[i].url,
+                              value,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: l10n.remove,
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => settings.removeSearchSource(
+                              settings.searchSources[i].url,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            _SearchSourceField(
+              hint: l10n.searchSourcesHint,
+              label: l10n.searchSourcesAdd,
+              onAdd: (url, language) =>
+                  settings.addSearchSource(url, language: language),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_backup_restore),
+              title: Text(l10n.searchSourcesReset),
+              enabled: !settings.searchSourcesIsDefault,
+              onTap: settings.searchSourcesIsDefault
+                  ? null
+                  : settings.resetSearchSources,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchSourceField extends StatefulWidget {
+  const _SearchSourceField({
+    required this.hint,
+    required this.label,
+    required this.onAdd,
+  });
+
+  final String hint;
+  final String label;
+  final Future<void> Function(String url, String language) onAdd;
+
+  @override
+  State<_SearchSourceField> createState() => _SearchSourceFieldState();
+}
+
+class _SearchSourceFieldState extends State<_SearchSourceField> {
+  final TextEditingController _controller = TextEditingController();
+  String _language = 'pt-br';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final value = _controller.text.trim();
+    if (value.isEmpty) return;
+    await widget.onAdd(value, _language);
+    _controller.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: widget.label,
+                hintText: widget.hint,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          DropdownButton<String>(
+            value: _language,
+            onChanged: (value) {
+              if (value != null) setState(() => _language = value);
+            },
+            items: [
+              for (final lang in _languages)
+                DropdownMenuItem(value: lang, child: Text(lang)),
+            ],
+          ),
+          const SizedBox(width: 8),
+          FilledButton(onPressed: _submit, child: Text(widget.label)),
         ],
       ),
     );

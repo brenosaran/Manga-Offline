@@ -67,6 +67,35 @@ void main() {
     );
   });
 
+  test('searchMangaUrl acha a página da obra pela busca (mesmo host)', () async {
+    const searchPage = '''
+<html><body>
+<a href="https://outro.com/manga/nao-e-o-mesmo/">fora</a>
+<a href="https://mangalivre.to/manga/sakamoto-days/">Sakamoto Days</a>
+</body></html>''';
+    final api = MangaLivreApi(
+      client: MockClient((request) async {
+        expect(request.url.queryParameters['post_type'], 'wp-manga');
+        return _html(searchPage);
+      }),
+    );
+    expect(
+      await api.searchMangaUrl('https://mangalivre.to', 'Sakamoto Days'),
+      'https://mangalivre.to/manga/sakamoto-days/',
+    );
+  });
+
+  test('searchMangaUrl devolve null se só houver links de outro host', () async {
+    const searchPage =
+        '<html><body><a href="https://outro.com/manga/x/">x</a></body></html>';
+    final api =
+        MangaLivreApi(client: MockClient((_) async => _html(searchPage)));
+    expect(
+      await api.searchMangaUrl('https://mangalivre.to', 'X'),
+      isNull,
+    );
+  });
+
   test('extrai as imagens do capítulo na ordem e limpa o src', () async {
     final api = MangaLivreApi(
       client: MockClient((_) async => _html(_chapterPage)),

@@ -3,6 +3,7 @@ import 'package:manga_offline/downloader/mangadex_downloader.dart';
 import 'package:manga_offline/downloader/mangalivre_api.dart';
 import 'package:manga_offline/downloader/mangalivre_downloader.dart';
 
+import '../core/settings_controller.dart';
 import 'mangadex_service.dart';
 
 /// Erro ao tentar baixar um capítulo que não foi encontrado nas fontes.
@@ -42,6 +43,11 @@ class ChapterDownloadService {
 
   /// Tenta baixar o [number] da obra [title] para [outDir].
   ///
+  /// A ordem/filtro das fontes vem da lista de **servidores de busca**
+  /// configurada em `Configurações → Desenvolvedor` (padrão: os servidores já
+  /// configurados do projeto). Cada entrada reconhecida é tentada na ordem da
+  /// lista; entradas sem adaptador são registradas e ignoradas.
+  ///
   /// Retorna o [ChapterResult] com o `.cbz` gravado. Lança
   /// [ChapterDownloadException] se não encontrar o capítulo em nenhuma fonte.
   Future<ChapterResult> downloadChapter({
@@ -57,49 +63,112 @@ class ChapterDownloadService {
     );
 
     final errors = <String>[];
-
-    // 1) Fonte principal: MangaDex.
-    try {
-      final id = (mangadexId != null && mangadexId.isNotEmpty)
-          ? mangadexId
-          : await _resolveMangadexId(title);
-      if (id != null && id.isNotEmpty) {
-        final chapters = await _dexApi.getChapters(
-          mangaId: id,
-          language: language,
-        );
-        final target = pickMangadexChapter(chapters, number);
-        if (target != null) {
-          final downloader = MangadexDownloader(api: _dexApi, options: options);
-          return await downloader.downloadChapter(target, mangaTitle: title);
-        }
-        errors.add('MangaDex: capítulo $number não encontrado.');
-      } else {
-        errors.add('MangaDex: obra "$title" não encontrada.');
-      }
-    } catch (e) {
-      errors.add('MangaDex: $e');
+    final sources = SettingsController.instance.downloadSearchSources;
+    if (sources.isEmpty) {
+      throw ChapterDownloadException(
+        'Nenhum servidor de busca ativo (Configurações → Desenvolvedor).',
+      );
     }
 
-    // 2) Fallback: MangaLivre.
-    try {
-      final url = mangaLivreUrlFor(title);
-      final chapters = await _mlApi.listChapters(url);
-      final target = pickMangaLivreChapter(chapters, number);
-      if (target != null) {
-        final downloader =
-            MangaLivreDownloader(api: _mlApi, options: options);
-        return await downloader.downloadChapter(target, mangaTitle: title);
+    for (final source in sources) {
+      final url = source.url;
+      final host = _hostOf(url);
+      try {
+        if (host.contains('mangadex')) {
+          final result = await _downloadFromMangadex(
+            title: title,
+            number: number,
+            options: options,
+            mangadexId: mangadexId,
+            language: source.language.isNotEmpty ? source.language : language,
+            errors: errors,
+          );
+          if (result != null) return result;
+        } else if (host.contains('mangalivre')) {
+          final result = await _downloadFromMangaLivre(
+            title: title,
+            number: number,
+            options: options,
+            errors: errors,
+          );
+          if (result != null) return result;
+        } else {
+          errors.add('$url: sem adaptador nativo disponível.');
+        }
+      } catch (e) {
+        errors.add('$url: $e');
       }
-      errors.add('MangaLivre: capítulo $number não encontrado.');
-    } catch (e) {
-      errors.add('MangaLivre: $e');
     }
 
     throw ChapterDownloadException(
       'Não foi possível baixar o capítulo $number de "$title". '
       '${errors.join(' | ')}',
     );
+  }
+
+  Future<ChapterResult?> _downloadFromMangadex({
+    required String title,
+    required int number,
+    required DownloadOptions options,
+    required String? mangadexId,
+    required String language,
+    required List<String> errors,
+  }) async {
+    final id = (mangadexId != null && mangadexId.isNotEmpty)
+        ? mangadexId
+        : await _resolveMangadexId(title);
+    if (id == null || id.isEmpty) {
+      errors.add('MangaDex: obra "$title" não encontrada.');
+      return null;
+    }
+    // Tenta o idioma configurado do servidor e, se não houver o capítulo nele,
+    // cai para o inglês antes de passar ao próximo servidor.
+    final languages = <String>{
+      if (language.isNotEmpty) language,
+      'en',
+    }.toList();
+    for (final lang in languages) {
+      final chapters = await _dexApi.getChapters(mangaId: id, language: lang);
+      final target = pickMangadexChapter(chapters, number);
+      if (target != null) {
+        final downloader = MangadexDownloader(api: _dexApi, options: options);
+        return downloader.downloadChapter(target, mangaTitle: title);
+      }
+    }
+    errors.add('MangaDex: capítulo $number não encontrado.');
+    return null;
+  }
+
+  Future<ChapterResult?> _downloadFromMangaLivre({
+    required String title,
+    required int number,
+    required DownloadOptions options,
+    required List<String> errors,
+  }) async {
+    // Procura a URL real da obra no site (mais robusto que montar o slug);
+    // se a busca falhar, cai no slug direto.
+    String? url;
+    try {
+      url = await _mlApi.searchMangaUrl(
+        ChapterDownloadService.mangaLivreHost,
+        title,
+      );
+    } catch (_) {}
+    url ??= mangaLivreUrlFor(title);
+    final chapters = await _mlApi.listChapters(url);
+    final target = pickMangaLivreChapter(chapters, number);
+    if (target == null) {
+      errors.add('MangaLivre: capítulo $number não encontrado.');
+      return null;
+    }
+    final downloader = MangaLivreDownloader(api: _mlApi, options: options);
+    return downloader.downloadChapter(target, mangaTitle: title);
+  }
+
+  /// Extrai o host de uma entrada configurada (aceita com ou sem esquema).
+  static String _hostOf(String source) {
+    final uri = Uri.tryParse(source.contains('://') ? source : 'https://$source');
+    return (uri?.host ?? source).toLowerCase();
   }
 
   Future<String?> _resolveMangadexId(String title) async {
@@ -142,9 +211,12 @@ MangaLivreChapter? pickMangaLivreChapter(
 }
 
 /// Monta a URL do mangá no MangaLivre a partir do título,
-/// ex.: `One Piece` → `https://mangalivre.to/manga/one-piece-ptbr/`.
+/// ex.: `One Piece` → `https://mangalivre.to/manga/one-piece/`.
+///
+/// É só um **fallback**: o fluxo normal usa [MangaLivreApi.searchMangaUrl]
+/// para achar a URL exata da obra.
 String mangaLivreUrlFor(String title) {
-  return '${ChapterDownloadService.mangaLivreHost}/manga/${slugifyTitle(title)}-ptbr/';
+  return '${ChapterDownloadService.mangaLivreHost}/manga/${slugifyTitle(title)}/';
 }
 
 /// Converte um título em slug simples (sem acentos), ex.: `One Piece`.

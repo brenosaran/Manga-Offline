@@ -90,6 +90,25 @@ class MangaLivreApi {
 
   String _stripSiteSuffix(String value) => value.split('|').first.trim();
 
+  /// Acha a URL da página da obra no site (tema Madara) pela **busca**:
+  /// `GET {baseUrl}/?s={query}&post_type=wp-manga`.
+  ///
+  /// É mais robusto do que montar o slug na mão (que pode variar por obra).
+  /// Retorna `null` se não encontrar.
+  Future<String?> searchMangaUrl(String baseUrl, String query) async {
+    final searchUrl =
+        '$baseUrl/?s=${Uri.encodeQueryComponent(query)}&post_type=wp-manga';
+    final html = await _getHtml(searchUrl);
+    final baseHost = Uri.tryParse(baseUrl)?.host;
+    final re = RegExp(r'''https?://[^"'\s<>]+?/manga/[A-Za-z0-9\-]+/''');
+    for (final match in re.allMatches(html)) {
+      final url = match.group(0)!;
+      final host = Uri.tryParse(url)?.host;
+      if (baseHost == null || host == baseHost) return url;
+    }
+    return null;
+  }
+
   /// Lista os capítulos encontrados na página do mangá.
   Future<List<MangaLivreChapter>> listChapters(String mangaUrl) async {
     final html = await _getHtml(mangaUrl);

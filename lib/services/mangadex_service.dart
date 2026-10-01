@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class MangaDexMatch {
-  MangaDexMatch({required this.id, required this.title});
+  MangaDexMatch({required this.id, required this.title, this.anilistId});
 
   final String id;
   final String title;
+
+  /// ID da obra na AniList, extraído de `attributes.links.al` (quando existir).
+  /// É o vínculo determinístico entre as duas plataformas.
+  final String? anilistId;
 }
 
 class MangaDexService {
@@ -19,31 +23,61 @@ class MangaDexService {
     'User-Agent': 'MangaOffline/1.0 (flutter)',
   };
 
-  Future<MangaDexMatch?> findByTitle(String title) async {
+  /// Lista candidatos do MangaDex para [title], já com o `links.al` (AniList)
+  /// quando a obra o tiver.
+  Future<List<MangaDexMatch>> searchMatches(String title, {int limit = 5}) async {
     final uri = Uri.parse(
       '$_base/manga?title=${Uri.encodeQueryComponent(title)}'
-      '&limit=5&order[relevance]=desc&contentRating[]=safe&contentRating[]=suggestive'
-      '&contentRating[]=erotica',
+      '&limit=$limit&order[relevance]=desc&contentRating[]=safe'
+      '&contentRating[]=suggestive&contentRating[]=erotica',
     );
     final response =
         await _client.get(uri, headers: _headers).timeout(const Duration(seconds: 20));
-    if (response.statusCode != 200) return null;
+    if (response.statusCode != 200) return const [];
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     final data = (body['data'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
-    if (data.isEmpty) return null;
 
-    MangaDexMatch? best;
-    var bestScore = -1.0;
+    final matches = <MangaDexMatch>[];
     for (final item in data) {
       final id = item['id']?.toString();
       if (id == null) continue;
       final attrs = item['attributes'] as Map<String, dynamic>?;
       final titleMap = attrs?['title'] as Map<String, dynamic>? ?? {};
-      final candidate = _titleOf(titleMap);
-      final score = _similarity(title, candidate);
+      final links = attrs?['links'] as Map<String, dynamic>?;
+      final al = links?['al']?.toString();
+      matches.add(MangaDexMatch(
+        id: id,
+        title: _titleOf(titleMap),
+        anilistId: (al == null || al.isEmpty) ? null : al,
+      ));
+    }
+    return matches;
+  }
+
+  /// Vínculo determinístico AniList ↔ MangaDex: acha a obra no MangaDex cujo
+  /// `links.al` casa exatamente com o [anilistId].
+  Future<MangaDexMatch?> findByAnilistId({
+    required String title,
+    required String anilistId,
+  }) async {
+    if (anilistId.isEmpty) return null;
+    final matches = await searchMatches(title);
+    for (final match in matches) {
+      if (match.anilistId == anilistId) return match;
+    }
+    return null;
+  }
+
+  /// Fallback: melhor candidato por semelhança de título.
+  Future<MangaDexMatch?> findByTitle(String title) async {
+    final matches = await searchMatches(title);
+    MangaDexMatch? best;
+    var bestScore = -1.0;
+    for (final match in matches) {
+      final score = _similarity(title, match.title);
       if (score > bestScore) {
         bestScore = score;
-        best = MangaDexMatch(id: id, title: candidate);
+        best = match;
       }
     }
     return best;

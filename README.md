@@ -1,22 +1,21 @@
 # Manga Offline
 
-Leitor de mangá/livro **offline** feito em **Flutter**, com foco em Android e Windows (desktop).
+Ferramenta **offline** de leitura e agregação de mangá/webcomic e imagens, feita em **Flutter**, para **Android** e **Windows (desktop)**. Funciona como um **leitor/agregador local**: organiza a sua biblioteca, abre arquivos de imagem que você já possui e oferece uma leitura confortável, sem depender de internet.
 
 ## Funcionalidades
-- Biblioteca com capas e progresso de leitura.
-- Importação de arquivos `.cbz` / `.zip`.
-- Organização automática em **volumes** (pastas), usando metadados online.
-- Capa própria de cada **capítulo** e capa colorida de cada **volume**.
-- Informações online: descrição, categorias, **similares** e **arco/saga por volume** (One Piece).
-- Leitura **da direita para a esquerda** (estilo mangá) e barra de progresso da direita para a esquerda.
-- Navegação por **botão de volume** no Android.
-- Colapsar/expandir volumes.
-- Excluir capítulo, volume ou obra (apagando os arquivos).
-- Placeholders ("fantasma") para capítulos faltantes, com importação manual.
+- Biblioteca local com capas e progresso de leitura.
+- Importação de arquivos `.cbz` / `.zip` e organização automática em **obras e volumes**.
+- Leitura **da direita para a esquerda** (estilo mangá), com barra de progresso invertida e modo imersivo.
+- **Detecção offline de balões de fala** (modelo `.tflite`) e **_Bubble Zoom_** no estilo Google Livros — o balão é recortado e ampliado sobre a página.
+- **Página dupla (spread)** em telas largas/dobráveis, com capa sozinha.
+- Navegação por **botão de volume** no Android (e teclado no desktop).
+- Metadados online opcionais (capa, descrição, categorias, **similares** e **arco/saga**).
+- Placeholders de capítulos ausentes, com **importação manual** de um arquivo do dispositivo e **lista de servidores de busca** configurável (em builds de debug, em *Configurações → Desenvolvedor*).
+- Exclusão em **3 níveis** (capítulo / volume / obra), apagando os arquivos.
 - Interface e metadados em **Português** e **English**.
 
 ## Stack
-Flutter/Dart · ObjectBox (banco local) · `http` · `archive` · `file_picker` · `provider`.
+Flutter/Dart · **ObjectBox** (banco local) · **`tflite_flutter` + `image`** (IA local) · `http` · `archive` · `file_picker` · `provider`.
 Metadados: AniList, MangaDex e One Piece API (arcos/sagas).
 
 ## Como compilar
@@ -35,5 +34,7 @@ Para gerar o código do ObjectBox (após mudar modelos):
 dart run build_runner build --force-jit
 ```
 
-## Aviso
-Este projeto é apenas um **leitor**. Ele **não** inclui nem baixa conteúdo protegido por direitos autorais; use apenas arquivos que você possui legalmente.
+Também há builds automatizados via **GitHub Actions** (`.github/workflows/release.yml`), disparados em tags `v*`.
+
+## Privacidade e uso responsável
+Este projeto é um **leitor / ferramenta de leitura e extração** — ele **não hospeda, não distribui e não oferece catálogo** de conteúdo protegido. A importação de arquivos usa apenas arquivos que você já possui; qualquer recurso opcional de download atende somente a **servidores privados configurados pelo usuário**. O conteúdo utilizado é de sua responsabilidade — use apenas arquivos que você possui ou tem o direito de acessar.
