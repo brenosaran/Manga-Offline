@@ -116,10 +116,10 @@ class L10n {
   String get languagePortuguese => 'Português';
   String get languageEnglish => 'English';
 
-  String get devSection => 'Desenvolvedor';
+  String get devSection => 'Repositórios';
   String get searchSourcesTitle => 'Servidores de busca';
   String get searchSourcesSubtitle =>
-      'Lista de servidores usados nos testes de build (padrão: os já configurados).';
+      'Sites onde o app procura os capítulos. O primeiro da lista é a preferência de download.';
   String get searchSourcesHint => 'servidorpessoal.com';
   String get searchSourcesAdd => 'Adicionar';
   String get searchSourcesReset => 'Restaurar padrão';
@@ -331,12 +331,12 @@ class En extends L10n {
   String get languageEnglish => 'English';
 
   @override
-  String get devSection => 'Developer';
+  String get devSection => 'Repositories';
   @override
   String get searchSourcesTitle => 'Search servers';
   @override
   String get searchSourcesSubtitle =>
-      'Servers used in build tests (default: the already-configured ones).';
+      'Sites where the app looks for chapters. The first in the list is the download preference.';
   @override
   String get searchSourcesHint => 'servidorpessoal.com';
   @override

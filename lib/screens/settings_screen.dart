@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -102,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(l10n.supportedFormats),
             subtitle: Text(l10n.supportedFormatsValue),
           ),
-          if (kDebugMode) ...[
+          ...[
             const Divider(height: 1),
             _SectionHeader(l10n.devSection),
             ListTile(
