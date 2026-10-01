@@ -81,6 +81,10 @@ class LibraryController extends ChangeNotifier {
   ImportReport? lastImport;
   bool isSyncingVolumes = false;
 
+  /// Validade do cache `VolumeIndex` (mapa capítulo→volume). Depois disso ele
+  /// é refeito na rede. Evita ir à internet em toda abertura do app.
+  static const Duration _volumeIndexMaxAge = Duration(days: 3);
+
   final Map<int, Map<int, int>> _chapterVolumeBySerie = {};
 
   static const Map<String, String> _accentMap = {
@@ -566,35 +570,29 @@ class LibraryController extends ChangeNotifier {
           if (await _syncArcs(serie)) changed = true;
         } catch (_) {}
 
-        // Mapa capítulo→volume. Sem `dexId`, ainda montamos a lista de
-        // capítulos pelo MangaLivre (volumes viram 0 = "Sem volume").
+        // Mapa capítulo→volume. Prefere o **cache** `VolumeIndex` (offline e
+        // rápido); só vai à rede quando não há cache válido.
         final map = <int, int>{};
         if (dexId != null && dexId.isNotEmpty) {
-          try {
-            map.addAll(await _dex.chapterVolumes(dexId));
-          } catch (_) {}
-          await _fillVolumeGaps(serie, map);
+          final cached = _readVolumeIndex(dexId);
+          if (cached != null && cached.isNotEmpty) {
+            map.addAll(cached);
+          } else {
+            try {
+              map.addAll(await _dex.chapterVolumes(dexId));
+            } catch (_) {}
+            await _fillVolumeGaps(serie, map);
+            await _fillMangaLivreGaps(serie, map);
+            _saveVolumeIndex(dexId, map);
+          }
+        } else {
+          await _fillMangaLivreGaps(serie, map);
         }
-        await _fillMangaLivreGaps(serie, map);
         _chapterVolumeBySerie[serie.id] = map;
 
         if (dexId == null || dexId.isEmpty) continue;
 
         try {
-          final data =
-              jsonEncode(map.map((k, v) => MapEntry(k.toString(), v)));
-          final existing = _db.volumeIndexes
-              .query(VolumeIndex_.dexId.equals(dexId))
-              .build()
-              .findFirst();
-          if (existing == null) {
-            _db.volumeIndexes.put(VolumeIndex(dexId: dexId, data: data));
-          } else {
-            existing.data = data;
-            existing.updatedAt = DateTime.now();
-            _db.volumeIndexes.put(existing);
-          }
-
           for (final chapter in chapters) {
             final volume = map[chapter.number.round()] ?? 0;
             if (volume != chapter.volume) {
@@ -604,12 +602,12 @@ class LibraryController extends ChangeNotifier {
               changed = true;
             }
           }
+        } catch (_) {}
 
-          try {
-            if (await _syncVolumeCovers(serie, dexId, map.values.toSet())) {
-              changed = true;
-            }
-          } catch (_) {}
+        try {
+          if (await _syncVolumeCovers(serie, dexId, map.values.toSet())) {
+            changed = true;
+          }
         } catch (_) {}
       }
     } finally {
@@ -657,8 +655,47 @@ class LibraryController extends ChangeNotifier {
     }
   }
 
+  /// Lê o cache `VolumeIndex` (mapa capítulo→volume) se existir e não estiver
+  /// velho ([_volumeIndexMaxAge]). Evita ir à rede em toda abertura do app.
+  Map<int, int>? _readVolumeIndex(String dexId) {
+    try {
+      final index = _db.volumeIndexes
+          .query(VolumeIndex_.dexId.equals(dexId))
+          .build()
+          .findFirst();
+      if (index == null || index.data.trim().isEmpty) return null;
+      if (DateTime.now().difference(index.updatedAt) > _volumeIndexMaxAge) {
+        return null;
+      }
+      final decoded = jsonDecode(index.data) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(int.parse(k), (v as num).toInt()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Grava/atualiza o cache `VolumeIndex` da obra.
+  void _saveVolumeIndex(String dexId, Map<int, int> map) {
+    try {
+      final data = jsonEncode(map.map((k, v) => MapEntry(k.toString(), v)));
+      final existing = _db.volumeIndexes
+          .query(VolumeIndex_.dexId.equals(dexId))
+          .build()
+          .findFirst();
+      if (existing == null) {
+        _db.volumeIndexes.put(VolumeIndex(dexId: dexId, data: data));
+      } else {
+        existing.data = data;
+        existing.updatedAt = DateTime.now();
+        _db.volumeIndexes.put(existing);
+      }
+    } catch (_) {}
+  }
+
   Future<bool> _syncArcs(Serie serie) async {
     if (!_normalize(serie.title).contains('onepiece')) return false;
+    // Já sincronizado: não refaz as chamadas à One Piece API em toda abertura.
+    if (serie.arcsJson.trim().isNotEmpty) return false;
     try {
       final map = await _onePiece.volumeSagas();
       if (map.isEmpty) return false;
@@ -696,12 +733,23 @@ class LibraryController extends ChangeNotifier {
   ) async {
     final present = volumes.where((v) => v > 0).toSet();
     if (present.isEmpty) return false;
+
+    final seriesDir = await _ensureSerieFolder(serie);
+    // Só consulta a rede para os volumes que ainda **não** têm capa em disco.
+    final missing = <int>{
+      for (final volume in present)
+        if (!File(p.join(seriesDir.path, _volumeFolder(serie, volume),
+                'cover.jpg'))
+            .existsSync())
+          volume,
+    };
+    if (missing.isEmpty) return false;
+
     final urls = await _dex.volumeCoverUrls(dexId);
     if (urls.isEmpty) return false;
 
-    final seriesDir = await _ensureSerieFolder(serie);
     var downloaded = false;
-    for (final volume in present) {
+    for (final volume in missing) {
       final url = urls[volume];
       if (url == null) continue;
       final dir = Directory(p.join(seriesDir.path, _volumeFolder(serie, volume)));
